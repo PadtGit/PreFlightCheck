@@ -1,0 +1,5 @@
+# Generated machine reports and local test artifacts
+GuiRuns/
+Reports/
+ValidationReport/
+*.log
