@@ -1,0 +1,71 @@
+name: Verify PreFlightCheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-verification:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install pinned test modules
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -ErrorAction Stop
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -ErrorAction Stop
+          Get-Module -ListAvailable Pester, PSScriptAnalyzer |
+            Sort-Object Name, Version -Descending |
+            Select-Object -First 4 Name, Version, Path
+
+      - name: Run Pester safety tests
+        shell: pwsh
+        run: |
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = './tests'
+          $configuration.Run.Exit = $true
+          $configuration.Output.Verbosity = 'Detailed'
+          $configuration.TestResult.Enabled = $true
+          $configuration.TestResult.OutputFormat = 'NUnitXml'
+          $configuration.TestResult.OutputPath = './test-results.xml'
+          # Registry virtualization is not part of this repository's tests and
+          # is disabled for compatibility with locked-down runners.
+          $configuration.TestRegistry.Enabled = $false
+          Invoke-Pester -Configuration $configuration
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $settings = New-Object System.Collections.Generic.List[string]
+          $paths = @('PreBackupMaintenance.ps1', 'Maintenance.Core.psm1', 'Invoke-PreBackupRun.ps1', 'Invoke-GuiTask.ps1', 'Start-Maintenance.ps1', 'Update-Applications.ps1', 'Weekly-DellReview.ps1')
+          foreach ($path in $paths) {
+            if (Test-Path -LiteralPath $path) { $settings.Add($path) }
+          }
+          $findings = [System.Collections.Generic.List[object]]::new()
+          foreach ($path in $settings) {
+            foreach ($finding in @(Invoke-ScriptAnalyzer -Path $path -IncludeDefaultRules -Severity Error,Warning,Information)) {
+              $findings.Add($finding)
+            }
+          }
+          if ($findings.Count -gt 0) {
+            $findings | Format-Table RuleName, Severity, ScriptName, Line, Column, Message -Wrap -AutoSize
+            throw "PSScriptAnalyzer reported $($findings.Count) finding(s)."
+          }
+          Write-Host "PSScriptAnalyzer passed for $($settings.Count) PowerShell files."
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pester-results
+          path: test-results.xml
+          if-no-files-found: ignore

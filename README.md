@@ -2,6 +2,8 @@
 
 **Clean system, smaller backup, faster restore.**
 
+Version: `0.2.0`
+
 Windows 11 pre-backup maintenance toolkit — integrity checks, disk cleanup, and health reports before your Veeam job runs.
 
 ## Quick start
