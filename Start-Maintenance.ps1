@@ -11,29 +11,40 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseBOMForUnicodeEncodedFile','',Justification='PowerShell 7 reads this UTF-8 interface file without a BOM.')]
 param(
     [string]$UiTestOutput,
-    [ValidateSet('Audit','Applications','Cleanup','Health','Dell')][string]$UiPage = 'Cleanup'
+    [ValidateSet('Runbook','Audit','Applications','Cleanup','Health','Dell')][string]$UiPage = 'Runbook'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows -or -not [Environment]::Is64BitProcess) { throw '64-bit PowerShell 7 on Windows is required.' }
 if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') { throw 'Use Start-Maintenance.cmd to open this window.' }
+$startupPrincipal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $UiTestOutput -and -not $startupPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $elevated = [Diagnostics.ProcessStartInfo]::new((Join-Path -Path $PSHOME -ChildPath 'pwsh.exe'))
+    $elevated.UseShellExecute = $true; $elevated.Verb = 'runas'; $elevated.WindowStyle = 'Hidden'
+    foreach ($argument in @('-NoLogo','-NoProfile','-STA','-File',$PSCommandPath,'-UiPage',$UiPage)) { [void]$elevated.ArgumentList.Add($argument) }
+    [void][Diagnostics.Process]::Start($elevated)
+    exit 0
+}
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 $script:root = $PSScriptRoot
 $script:runRoot = Join-Path -Path $root -ChildPath 'GuiRuns'
 $script:active = $null
 $script:runDirectory = $null
-$script:lastPage = 'Audit'
+$script:sessionDirectory = $null
+$script:taskNumber = 0
+$script:healthReady = $false
+$script:lastPage = 'Runbook'
 [xml]$layout = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="780" MinWidth="940" MinHeight="650" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
 <Window.Resources>
-<Style TargetType="Button"><Setter Property="Padding" Value="12,9"/><Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
+<Style TargetType="Button"><Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="0,0,8,6"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
 <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
 <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E9F1F7"/><Setter Property="Margin" Value="0,5,0,8"/></Style>
 </Window.Resources>
 <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="220"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock Text="PRE-BACKUP MAINTENANCE" FontSize="26" FontWeight="Bold"/><TextBlock x:Name="Session" Foreground="#ADC0D2" Margin="0,6,0,16"/></StackPanel>
 <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<StackPanel x:Name="Tasks"><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,0,0,7"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,10,0,7"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><Button x:Name="HealthButton" Content="Windows health"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,10,0,7"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel>
+<StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,5"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel>
 <Grid Grid.Column="1" Margin="20,0,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock x:Name="Heading" FontSize="22" FontWeight="Bold"/><TextBlock x:Name="Description" Margin="0,8,0,5"/><TextBlock x:Name="Access" Foreground="#F3C87F" Margin="0,0,0,12"/></StackPanel>
 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Options">
@@ -48,18 +59,25 @@ $script:lastPage = 'Audit'
 </Grid></Window>
 '@
 $script:window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
-foreach ($name in @('Session','Tasks','AuditButton','ApplicationsButton','CleanupButton','HealthButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenGuide','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
+foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenGuide','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$Session.Text = if ($isAdmin) { 'Administrator session • one task at a time • reports saved automatically' } else { 'Standard session • Windows will request permission only for cleanup or health work' }
+$Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
 function Show-Page {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet('Audit','Applications','Cleanup','Health','Dell')][string]$Page)
+    param([Parameter(Mandatory)][ValidateSet('Runbook','Audit','Applications','Cleanup','Health','Dell')][string]$Page)
     $script:lastPage = $Page
     $ValueInput.Visibility = 'Collapsed'; $InputLabel.Visibility = 'Collapsed'; $OptionOne.Visibility = 'Collapsed'; $OptionTwo.Visibility = 'Collapsed'; $NoticeBorder.Visibility = 'Visible'; $Preview.Visibility = 'Visible'; $Apply.Visibility = 'Visible'
     switch ($Page) {
+        'Runbook' {
+            $Heading.Text = 'Guided pre-backup run'; $Description.Text = 'Run system review, Windows health, update preview and cleanup in the safe order.'; $Access.Text = 'Administrator session required. The run stops before cleanup if repair or restart is needed.'
+            $InputLabel.Text = 'Minimum temporary-file age in days (7 to 365)'; $InputLabel.Visibility = 'Visible'; $ValueInput.Visibility = 'Visible'; $ValueInput.Text = '14'
+            $OptionOne.Content = 'Also empty my Recycle Bin during cleanup'; $OptionOne.Visibility = 'Visible'; $OptionOne.IsChecked = $false
+            $OptionTwo.Content = 'Also clear the Delivery Optimization cache'; $OptionTwo.Visibility = 'Visible'; $OptionTwo.IsChecked = $false
+            $Notice.Text = 'Creates one timestamped session log. A restart or recommended repair stops the sequence before cleanup and backup.'; $Preview.Visibility = 'Collapsed'; $Apply.Content = 'Start guided run…'
+        }
         'Audit' {
-            $Heading.Text = 'System review'; $Description.Text = 'Collect disk, volume, restart, security, event, VSS and temporary-file information.'; $Access.Text = 'Read-only. Administrator access adds VSS writer details.'
+            $Heading.Text = 'System review'; $Description.Text = 'Collect disk, volume, restart, security, event, VSS and temporary-file information.'; $Access.Text = 'Read-only. The elevated dashboard always collects VSS writer details.'
             $Notice.Text = 'This is an assessment. A clean report cannot guarantee that every file, application, or backup is healthy.'; $Preview.Content = 'Run system review'; $Apply.Visibility = 'Collapsed'
         }
         'Applications' {
@@ -68,7 +86,7 @@ function Show-Page {
             $Notice.Text = 'Preview first. Unknown-version, pinned, forced, automatic-all, agreement auto-acceptance and automatic reboot options are not used.'; $Preview.Content = 'Preview updates'; $Apply.Content = 'Install selected apps…'
         }
         'Cleanup' {
-            $Heading.Text = 'Pre-backup cleanup'; $Description.Text = 'Measure and remove old regular files only from the user and Windows temporary folders.'; $Access.Text = 'Preview is read-only. Cleanup requests Administrator permission.'
+            $Heading.Text = 'Pre-backup cleanup'; $Description.Text = 'Measure and remove old regular files only from the user and Windows temporary folders.'; $Access.Text = 'Actual cleanup requires a successful Windows health check in this dashboard session.'
             $InputLabel.Text = 'Minimum file age in days (7 to 365)'; $InputLabel.Visibility = 'Visible'; $ValueInput.Visibility = 'Visible'; $ValueInput.Text = '14'
             $OptionOne.Content = 'Also empty my Recycle Bin'; $OptionOne.Visibility = 'Visible'; $OptionOne.IsChecked = $false
             $OptionTwo.Content = 'Also clear the Delivery Optimization cache'; $OptionTwo.Visibility = 'Visible'; $OptionTwo.IsChecked = $false
@@ -102,6 +120,13 @@ function Start-DashboardTask {
         $request = @{ Task = $task }
         $requiresAdmin = $false
         switch ($script:lastPage) {
+            'Runbook' {
+                if (-not $ApplyChanges) { return }
+                $request.Task = 'PreBackupRun'; $request.MinimumAgeDays = Get-CleanupAge
+                $request.EmptyRecycleBin = [bool]$OptionOne.IsChecked; $request.ClearDeliveryCache = [bool]$OptionTwo.IsChecked
+                $requiresAdmin = $true
+            }
+            'Audit' { $requiresAdmin = $true }
             'Applications' {
                 if ($ApplyChanges) {
                     $ids = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -111,7 +136,10 @@ function Start-DashboardTask {
             }
             'Cleanup' {
                 $request.MinimumAgeDays = Get-CleanupAge
-                if ($ApplyChanges) { $request.Task = 'Clean'; $request.EmptyRecycleBin = [bool]$OptionOne.IsChecked; $request.ClearDeliveryCache = [bool]$OptionTwo.IsChecked; $requiresAdmin = $true }
+                if ($ApplyChanges) {
+                    if (-not $script:healthReady) { throw 'Run Windows health checks first. Cleanup stays locked until this dashboard session records a healthy result with no restart required.' }
+                    $request.Task = 'Clean'; $request.EmptyRecycleBin = [bool]$OptionOne.IsChecked; $request.ClearDeliveryCache = [bool]$OptionTwo.IsChecked; $requiresAdmin = $true
+                }
                 else { $request.Task = 'CleanPreview' }
             }
             'Health' {
@@ -125,7 +153,14 @@ function Start-DashboardTask {
             $choice = [Windows.MessageBox]::Show($window, "Apply the selected $($Heading.Text.ToLowerInvariant()) action? Save work, close applications, connect AC power, and confirm no backup or update is running.", 'Confirm maintenance', 'YesNo', 'Warning')
             if ($choice -ne 'Yes') { return }
         }
-        $script:runDirectory = Join-Path -Path $runRoot -ChildPath ([datetime]::Now.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+        if (-not $script:sessionDirectory) {
+            $script:sessionDirectory = Join-Path -Path $runRoot -ChildPath ([datetime]::Now.ToString('yyyyMMdd-HHmmss') + '-session-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+            [void][IO.Directory]::CreateDirectory($script:sessionDirectory)
+            @('PRE-BACKUP MAINTENANCE SESSION', "Started: $([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))", "Computer: $env:COMPUTERNAME", 'All dashboard tasks from this launch are recorded below.') | Set-Content -LiteralPath (Join-Path -Path $script:sessionDirectory -ChildPath 'session.log') -Encoding UTF8
+        }
+        $script:taskNumber++
+        $taskFolder = '{0:D2}-{1}-{2}' -f $script:taskNumber,$request.Task,[guid]::NewGuid().ToString('N').Substring(0,6)
+        $script:runDirectory = Join-Path -Path $script:sessionDirectory -ChildPath $taskFolder
         [void][IO.Directory]::CreateDirectory($runDirectory)
         $requestPath = Join-Path -Path $runDirectory -ChildPath 'request.json'
         $request | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $requestPath -Encoding utf8
@@ -139,9 +174,9 @@ function Start-DashboardTask {
         $Console.Text = "Running $($request.Task)…`r`nResults: $runDirectory"; $Status.Text = 'Running'
     } catch { [void][Windows.MessageBox]::Show($window, $_.Exception.Message, 'Unable to start', 'OK', 'Error') }
 }
-$AuditButton.Add_Click({ Show-Page Audit }); $ApplicationsButton.Add_Click({ Show-Page Applications }); $CleanupButton.Add_Click({ Show-Page Cleanup }); $HealthButton.Add_Click({ Show-Page Health }); $DellButton.Add_Click({ Show-Page Dell })
+$RunbookButton.Add_Click({ Show-Page Runbook }); $AuditButton.Add_Click({ Show-Page Audit }); $ApplicationsButton.Add_Click({ Show-Page Applications }); $CleanupButton.Add_Click({ Show-Page Cleanup }); $HealthButton.Add_Click({ Show-Page Health }); $DellButton.Add_Click({ Show-Page Dell })
 $Preview.Add_Click({ Start-DashboardTask }); $Apply.Add_Click({ Start-DashboardTask -ApplyChanges })
-$OpenResults.Add_Click({ if ($script:runDirectory) { Start-Process -FilePath explorer.exe -ArgumentList ('"' + $script:runDirectory + '"') } else { [void][Windows.MessageBox]::Show('Run a task first.') } })
+$OpenResults.Add_Click({ if ($script:sessionDirectory) { Start-Process -FilePath explorer.exe -ArgumentList ('"' + $script:sessionDirectory + '"') } else { [void][Windows.MessageBox]::Show('Run a task first.') } })
 $OpenGuide.Add_Click({ Start-Process -FilePath (Join-Path -Path $root -ChildPath 'README.md') })
 $timer = [Windows.Threading.DispatcherTimer]::new(); $timer.Interval = [timespan]::FromMilliseconds(700)
 $timer.Add_Tick({
@@ -151,6 +186,20 @@ $timer.Add_Tick({
             $summaryPath = Join-Path -Path $runDirectory -ChildPath 'summary.txt'
             $Console.Text = if (Test-Path -LiteralPath $summaryPath) { Get-Content -LiteralPath $summaryPath -Raw } else { 'NEEDS ATTENTION - no summary was saved.' }
             $Console.ScrollToHome(); $Status.Text = ($Console.Text -split '\r?\n')[0]
+            $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
+            if (Test-Path -LiteralPath $finishedPath) {
+                $finished = Get-Content -LiteralPath $finishedPath -Raw | ConvertFrom-Json
+                if ($finished.Task -in @('HealthCheck','HealthRepair','PreBackupRun')) { $script:healthReady = [bool]$finished.HealthReady }
+                if ($finished.RestartRequired) {
+                    $script:healthReady = $false
+                    $Status.Text = 'RESTART REQUIRED - stop before cleanup or backup'
+                    [void][Windows.MessageBox]::Show($window, 'Restart Windows before running cleanup or starting the Veeam backup. After restarting, open the dashboard and begin a new guided run.', 'Restart required', 'OK', 'Stop')
+                } elseif ($finished.RepairRecommended) {
+                    $script:healthReady = $false
+                    $Status.Text = 'WINDOWS REPAIR RECOMMENDED - cleanup remains locked'
+                    [void][Windows.MessageBox]::Show($window, 'Windows health checks recommend repair or manual review. Open the saved results and run Repair Windows before cleanup.', 'Repair recommended', 'OK', 'Warning')
+                }
+            }
             $script:active.Dispose(); $script:active = $null
             $Tasks.IsEnabled = $true; $Options.IsEnabled = $true; $Preview.IsEnabled = $true; $Apply.IsEnabled = $true
         }
@@ -165,7 +214,7 @@ $window.Add_ContentRendered({
 })
 Show-Page -Page $UiPage
 if ($UiTestOutput) {
-    foreach ($page in @('Audit','Applications','Cleanup','Health','Dell')) { Show-Page -Page $page; if ($Heading.Text.Length -eq 0) { throw "Page failed: $page" } }
+    foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','Dell')) { Show-Page -Page $page; if ($Heading.Text.Length -eq 0) { throw "Page failed: $page" } }
     Show-Page -Page $UiPage
     if ($UiPage -eq 'Cleanup') {
         foreach ($invalid in @('0','6','366','1.5','abc')) { $ValueInput.Text = $invalid; $rejected = $false; try { Get-CleanupAge | Out-Null } catch { $rejected = $true }; if (-not $rejected) { throw "Invalid age accepted: $invalid" } }
@@ -175,5 +224,5 @@ if ($UiTestOutput) {
     $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1080,740,96,96,[Windows.Media.PixelFormats]::Pbgra32); $bitmap.Render($surface)
     $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new(); $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
     $stream = [IO.File]::Create([IO.Path]::GetFullPath($UiTestOutput)); try { $encoder.Save($stream) } finally { $stream.Dispose() }
-    Write-Output 'PASS: five dashboard pages rendered and cleanup input limits were validated. No maintenance ran.'
+    Write-Output 'PASS: six dashboard pages rendered and cleanup input limits were validated. No maintenance ran.'
 } else { $timer.Start(); try { [void]$window.ShowDialog() } finally { $timer.Stop() } }

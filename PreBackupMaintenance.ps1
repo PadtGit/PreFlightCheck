@@ -103,6 +103,7 @@ try {
         Results = [System.Collections.Generic.List[object]]::new()
         System = $null; Restart = $null; Power = $null; Disks = @(); VolumesBefore = @(); VolumesAfter = @()
         TempCandidates = @(); Cleanup = @(); Software = @(); SpaceChange = @()
+        RepairRecommended = $false; RestartRequired = $false; RestartAfter = $null; HealthReady = $false
     }
     $identity = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     $admin = $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -203,11 +204,22 @@ try {
         $componentHealthy = $false
         if ($PSCmdlet.ShouldProcess('Windows', "DISM $healthOperation then SFC $sfcOperation")) {
             $healthCode = Invoke-LoggedProgram -Name DISM-Health -FilePath "$env:SystemRoot\System32\DISM.exe" -Arguments @('/Online','/English','/Cleanup-Image',$healthOperation) -AcceptedCodes @(0,3010)
-            if ($healthCode -eq 3010) { throw 'DISM requests a restart. Stop maintenance and review its log.' }
+            if ($healthCode -eq 3010) {
+                $report.RestartRequired = $true
+                throw 'RESTART REQUIRED: DISM requests a restart. Restart Windows before cleanup or backup.'
+            }
             $healthText = Get-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'DISM-Health.txt') -Raw
             $componentHealthy = $healthText -match 'No component store corruption detected\.' -or ($RepairWindows -and $healthText -match 'The restore operation completed successfully\.')
             [void](Invoke-LoggedProgram -Name SFC -FilePath "$env:SystemRoot\System32\sfc.exe" -Arguments @($sfcOperation))
-            Add-Result -Step Integrity -Status Review -Detail 'Read DISM and SFC conclusions. Native exit success alone does not certify all files or applications.'
+            $sfcText = Get-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'SFC.txt') -Raw
+            $sfcHealthy = $sfcText -match 'Windows Resource Protection did not find any integrity violations\.'
+            if ($RepairWindows) { $sfcHealthy = $sfcHealthy -or $sfcText -match 'Windows Resource Protection found corrupt files and successfully repaired them\.' }
+            if (-not $componentHealthy -or -not $sfcHealthy) {
+                $report.RepairRecommended = $true
+                Add-Result -Step Integrity -Status Review -Detail 'Windows health output needs repair or manual review. Open the DISM and SFC logs before cleanup.'
+            } else {
+                Add-Result -Step Integrity -Status Observed -Detail 'DISM and SFC reported a healthy or successfully repaired Windows image. Native results cannot certify every application.'
+            }
         }
         foreach ($volume in @($report.VolumesBefore | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter -and $_.FileSystem -eq 'NTFS' })) {
             if ($PSCmdlet.ShouldProcess("$($volume.DriveLetter):", 'Online file-system scan; defer fixes')) {
@@ -219,8 +231,18 @@ try {
             $restartBeforeCleanup = Get-PendingRestartState
             if ($restartBeforeCleanup.Pending -or $restartBeforeCleanup.Unknown.Count -gt 0) { throw 'Restart state changed during health work. Review before component cleanup.' }
             $cleanupCode = Invoke-LoggedProgram -Name ComponentCleanup -FilePath "$env:SystemRoot\System32\DISM.exe" -Arguments @('/Online','/English','/Cleanup-Image','/StartComponentCleanup') -AcceptedCodes @(0,3010)
-            if ($cleanupCode -eq 3010) { Add-Result -Step ComponentCleanup -Status Review -Detail 'Restart requested.' }
+            if ($cleanupCode -eq 3010) {
+                $report.RestartRequired = $true
+                Add-Result -Step ComponentCleanup -Status Review -Detail 'RESTART REQUIRED: restart Windows before cleanup or backup.'
+            }
         }
+        $report.RestartAfter = Get-PendingRestartState
+        if ($report.RestartAfter.Pending -or $report.RestartAfter.Unknown.Count -gt 0) {
+            $report.RestartRequired = $true
+            Add-Result -Step RestartAfterHealth -Status Review -Detail 'RESTART REQUIRED: Windows reports a pending or unknown restart state. Restart before cleanup or backup.'
+        }
+        $report.HealthReady = -not $report.RepairRecommended -and -not $report.RestartRequired
+        if ($report.HealthReady) { Add-Result -Step HealthGate -Status Completed -Detail 'Health checks passed the cleanup gate for this session.' }
     }
     if ($Mode -eq 'Updates') {
         $uninstallRoots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
