@@ -5,6 +5,7 @@
 .DESCRIPTION
     Defaults to Audit. Clean removes only aged files from known temporary folders.
     Health runs diagnostics; repairs and component cleanup require separate switches.
+    SystemRepair runs the WinUtil-style disk, protected-file and image repair sequence.
     Updates inventories software and offers supported update entry points.
     Firmware installation is deliberately a separate attended maintenance operation.
     No automatic reboot, snapshot deletion, update cache reset or network reset.
@@ -48,12 +49,15 @@
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
 param(
-    [ValidateSet('Audit','Clean','Health','Updates')][string]$Mode = 'Audit',
+    [ValidateSet('Audit','Clean','Health','SystemRepair','Updates')][string]$Mode = 'Audit',
     [ValidateRange(7,365)][int]$MinimumAgeDays = 14,
     [switch]$EmptyRecycleBin,
     [switch]$ClearDeliveryCache,
     [switch]$RepairWindows,
     [switch]$ComponentCleanup,
+    [switch]$Uninstall,
+    [switch]$UpgradeAll,
+    [switch]$ShowInstalled,
     [string[]]$ApplicationId = @(),
     [switch]$MaintenanceWindowConfirmed,
     [switch]$OpenUpdatePages,
@@ -64,7 +68,9 @@ $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'Maintenance.Core.psm1') -Force
 if (($EmptyRecycleBin -or $ClearDeliveryCache) -and $Mode -ne 'Clean') { throw 'Cleanup switches require Clean mode.' }
 if (($RepairWindows -or $ComponentCleanup) -and $Mode -ne 'Health') { throw 'Repair switches require Health mode.' }
+if (($Uninstall -or $UpgradeAll -or $ShowInstalled) -and $Mode -ne 'Updates') { throw 'Winget action switches require Updates mode.' }
 if (($ApplicationId.Count -gt 0 -or $OpenUpdatePages) -and $Mode -ne 'Updates') { throw 'Update switches require Updates mode.' }
+if (($Uninstall -or $ApplicationId.Count -gt 0) -and $Mode -eq 'Updates' -and -not $MaintenanceWindowConfirmed -and -not $WhatIfPreference) { throw 'Selected application changes require -MaintenanceWindowConfirmed.' }
 foreach ($id in $ApplicationId) {
     if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]*$') { throw "Invalid exact application ID: $id" }
     if ($id -match '^(Dell|Alienware)\.' -or $id -match '(BIOS|Firmware)') { throw 'Manage Dell and firmware updates separately using Weekly-DellReview.ps1.' }
@@ -107,7 +113,7 @@ try {
     }
     $identity = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     $admin = $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    $maintenance = $Mode -in @('Clean','Health') -or $ApplicationId.Count -gt 0
+    $maintenance = $Mode -in @('Clean','Health','SystemRepair') -or $ApplicationId.Count -gt 0 -or $Uninstall -or $UpgradeAll
     $os = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $bios = Get-ItemProperty -LiteralPath 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS'
     $report.System = [pscustomobject]@{ Model = $bios.SystemProductName; Manufacturer = $bios.SystemManufacturer; BIOS = $bios.BIOSVersion; BIOSDate = $bios.BIOSReleaseDate; WindowsVersion = $os.DisplayVersion; Build = "$($os.CurrentBuild).$($os.UBR)"; Elevated = $admin; PowerShell = $PSVersionTable.PSVersion.ToString() }
@@ -166,10 +172,10 @@ try {
     }
     Add-Result -Step TempInventory -Status Observed -Detail "$($report.TempCandidates.Count) aged temporary file candidates. Age reduces risk but does not prove a file is disposable."
     if ($maintenance -and -not $WhatIfPreference) {
-        if ($Mode -in @('Clean','Health') -and -not $admin) { throw 'Actual cleanup and health checks require Run as administrator.' }
+        if ($Mode -in @('Clean','Health','SystemRepair') -and -not $admin) { throw 'Actual cleanup and health checks require Run as administrator.' }
         if (-not $MaintenanceWindowConfirmed) { throw 'Save work, close apps, verify recovery copy and no active backup/update; then use -MaintenanceWindowConfirmed.' }
         if ($null -eq $report.Power -or -not $report.Power.Known -or -not $report.Power.OnAC) { throw 'Actual maintenance requires confirmed AC power.' }
-        if ($report.Restart.Pending -or $report.Restart.Unknown.Count -gt 0) { throw 'Review pending/unknown restart state before maintenance. This does not prohibit a protective backup.' }
+        if ($Mode -ne 'SystemRepair' -and ($report.Restart.Pending -or $report.Restart.Unknown.Count -gt 0)) { throw 'Review pending/unknown restart state before maintenance. This does not prohibit a protective backup.' }
         if ($report.Disks.Count -eq 0 -or @($report.Disks | Where-Object { $_.HealthStatus -ne 'Healthy' }).Count -gt 0) { throw 'Disk health is unavailable or abnormal; protect data before maintenance.' }
         if ($report.VolumesBefore.Count -eq 0 -or @($report.VolumesBefore | Where-Object { $_.DriveType -eq 'Fixed' -and $_.HealthStatus -ne 'Healthy' }).Count -gt 0) { throw 'Volume health is unavailable or abnormal; protect data before maintenance.' }
     }
@@ -192,6 +198,20 @@ try {
         if ($ClearDeliveryCache -and $PSCmdlet.ShouldProcess('Delivery Optimization cache', 'Delete cached delivery files')) {
             Delete-DeliveryOptimizationCache -Force -ErrorAction Stop
             Add-Result -Step DeliveryCache -Status Completed -Detail 'Delivery Optimization cache cleared.'
+        }
+    }
+    if ($Mode -eq 'SystemRepair') {
+        if ($PSCmdlet.ShouldProcess('Windows system', 'Run WinUtil-style system corruption scan and repair')) {
+            [void](Invoke-LoggedProgram -Name SystemRepair-CHKDSK -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','chkdsk /scan /perf') -AcceptedCodes @(0,1,2))
+            [void](Invoke-LoggedProgram -Name SystemRepair-SFC -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','sfc /scannow'))
+            $repairCode = Invoke-LoggedProgram -Name SystemRepair-DISM -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','dism /online /cleanup-image /restorehealth') -AcceptedCodes @(0,3010)
+            if ($repairCode -eq 3010) {
+                $report.RestartRequired = $true
+                Add-Result -Step SystemRepair -Status Review -Detail 'RESTART REQUIRED: DISM repaired the image and requested a restart.'
+            } else {
+                Add-Result -Step SystemRepair -Status Completed -Detail 'WinUtil-style system corruption scan completed.'
+            }
+            $report.HealthReady = -not $report.RestartRequired -and -not $report.Restart.Pending -and $report.Restart.Unknown.Count -eq 0
         }
     }
     if ($Mode -eq 'Health') {
@@ -254,18 +274,37 @@ try {
                 }
             }
         }
+        # Resolve only the App Installer alias in the user's WindowsApps directory.
+        # Never execute a PATH-resolved or otherwise user-supplied executable while elevated.
         $wingetPath = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\WindowsApps\winget.exe'
-        $wingetCommand = Get-Command -Name winget.exe -ErrorAction SilentlyContinue
-        if ($wingetCommand) { $wingetPath = $wingetCommand.Source }
-        if (Test-Path -LiteralPath $wingetPath) {
+        $wingetTrusted = $false
+        try {
+            $wingetItem = Get-Item -LiteralPath $wingetPath -Force -ErrorAction Stop
+            $windowsAppsRoot = [IO.Path]::GetFullPath((Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\WindowsApps')).TrimEnd('\') + '\'
+            $resolvedWinget = [IO.Path]::GetFullPath($wingetItem.FullName)
+            $signature = Get-AuthenticodeSignature -LiteralPath $resolvedWinget -ErrorAction Stop
+            $wingetTrusted = $resolvedWinget.StartsWith($windowsAppsRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                $signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -match '(?i)Microsoft'
+        } catch { Add-Result -Step AppUpdates -Status Review -Detail "WinGet trust validation failed: $($_.Exception.Message)" }
+        if ($wingetTrusted) {
             # No automatic source/package agreement acceptance; first-run prompts fail visibly.
-            try {
-                $updateExit = Invoke-LoggedProgram -Name AvailableAppUpdates -FilePath $wingetPath -Arguments @('upgrade','--disable-interactivity') -AcceptedCodes @(0,-1978335189)
-                if ($updateExit -ne 0) { Add-Result -Step AppUpdates -Status Observed -Detail 'WinGet reports no applicable upgrades.' }
-            } catch { Add-Result -Step AppUpdates -Status Review -Detail $_.Exception.Message }
+            if (-not $ShowInstalled) {
+                try {
+                    $updateExit = Invoke-LoggedProgram -Name AvailableAppUpdates -FilePath $wingetPath -Arguments @('upgrade','--disable-interactivity') -AcceptedCodes @(0,-1978335189)
+                    if ($updateExit -ne 0) { Add-Result -Step AppUpdates -Status Observed -Detail 'WinGet reports no applicable upgrades.' }
+                } catch { Add-Result -Step AppUpdates -Status Review -Detail $_.Exception.Message }
+            }
+            if ($ShowInstalled -and $PSCmdlet.ShouldProcess('Installed applications', 'List installed WinGet applications')) {
+                [void](Invoke-LoggedProgram -Name InstalledApps -FilePath $wingetPath -Arguments @('list','--disable-interactivity'))
+            }
+            if ($UpgradeAll -and $PSCmdlet.ShouldProcess('All supported applications', 'Upgrade all WinGet applications')) {
+                [void](Invoke-LoggedProgram -Name UpgradeAll -FilePath $wingetPath -Arguments @('upgrade','--all','--disable-interactivity'))
+            }
             foreach ($id in $ApplicationId) {
-                if ($PSCmdlet.ShouldProcess($id, 'Install selected exact WinGet application update')) {
-                    [void](Invoke-LoggedProgram -Name "Update-$id" -FilePath $wingetPath -Arguments @('upgrade','--id',$id,'--exact','--disable-interactivity'))
+                if ($PSCmdlet.ShouldProcess($id, $(if ($Uninstall) { 'Uninstall selected exact WinGet application' } else { 'Install or upgrade selected exact WinGet application' }))) {
+                    $wingetAction = if ($Uninstall) { @('uninstall','--id',$id,'--exact','--disable-interactivity') } else { @('install','--id',$id,'--exact','--upgrade','--disable-interactivity') }
+                    $actionName = if ($Uninstall) { 'Uninstall' } else { 'InstallUpgrade' }
+                    [void](Invoke-LoggedProgram -Name "$actionName-$id" -FilePath $wingetPath -Arguments $wingetAction)
                     $restartAfterUpdate = Get-PendingRestartState
                     if ($restartAfterUpdate.Pending -or $restartAfterUpdate.Unknown.Count -gt 0) { throw 'An application update left a pending or unknown restart state. Review and restart before further maintenance.' }
                 }
@@ -302,3 +341,4 @@ try {
 if ($null -eq $report -or @($report.Results | Where-Object { $_.Status -eq 'Failed' }).Count -gt 0) { exit 1 }
 if (@($report.Results | Where-Object { $_.Status -eq 'Review' }).Count -gt 0) { exit 2 }
 exit 0
+

@@ -19,6 +19,7 @@ The dashboard always requests Administrator permission so System Review can coll
 - System review: storage, pending restart state, Windows security status, recent errors, VSS information, and temporary-file inventory.
 - Cleanup: old regular files from user and Windows Temp folders, with optional Recycle Bin and Delivery Optimization cleanup.
 - Windows health: DISM, SFC, and online NTFS checks, with optional repair and component cleanup.
+- System Corruption Scan: a separate WinUtil-style sequence using `chkdsk /scan /perf`, `sfc /scannow`, and `dism /online /cleanup-image /restorehealth`.
 - Application updates: preview WinGet updates and select exact application IDs.
 - Dell review: attended BIOS and driver review specifically for the **Dell G5 5590**.
 - Guided run: enforces review → health → update preview → cleanup preview → cleanup → final review, and stops before cleanup when repair or restart is required.
@@ -43,6 +44,8 @@ Run maintenance during a separate quiet window, review the reports, and finish a
 | `Weekly-DellReview.ps1` | Dell G5 5590 review helper |
 
 Dashboard results are saved under `GuiRuns/`; every dashboard launch gets one timestamped session folder and one combined `session.log`. Each task also keeps its detailed `report.json`, `steps.csv`, console output, and native-tool logs. Direct command-line runs default to `Reports/`. Generated reports can contain local paths and system information and are excluded from version control.
+
+The **WinGet applications** page includes separate buttons for Install/Upgrade selected IDs, Uninstall selected IDs, Upgrade all applications, Show Installed Apps, and Clear Selection. The installed-app list is displayed in the dashboard result area and saved with the task report.
 
 ## Recommended order
 
@@ -123,3 +126,4 @@ Deleting files from the source may not reduce an incremental backup by the same 
 - [Microsoft CHKDSK documentation](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/chkdsk)
 - [Dell G5 5590 drivers and downloads](https://www.dell.com/support/home/en-us/product-support/product/g-series-15-5590-laptop/drivers)
 - [Dell Update end-of-life notice](https://www.dell.com/support/kbdoc/en-us/000255949/alienware-update-and-dell-update-end-of-life-eol-announcement?lang=en)
+

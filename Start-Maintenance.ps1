@@ -11,7 +11,7 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseBOMForUnicodeEncodedFile','',Justification='PowerShell 7 reads this UTF-8 interface file without a BOM.')]
 param(
     [string]$UiTestOutput,
-    [ValidateSet('Runbook','Audit','Applications','Cleanup','Health','Dell')][string]$UiPage = 'Runbook'
+    [ValidateSet('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')][string]$UiPage = 'Runbook'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -44,11 +44,13 @@ $script:lastPage = 'Runbook'
 <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="220"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock Text="PRE-BACKUP MAINTENANCE" FontSize="26" FontWeight="Bold"/><TextBlock x:Name="Session" Foreground="#ADC0D2" Margin="0,6,0,16"/></StackPanel>
 <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,5"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel>
+<StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,5"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="SystemRepairButton" Content="System Corruption Scan - Run"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel>
 <Grid Grid.Column="1" Margin="20,0,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock x:Name="Heading" FontSize="22" FontWeight="Bold"/><TextBlock x:Name="Description" Margin="0,8,0,5"/><TextBlock x:Name="Access" Foreground="#F3C87F" Margin="0,0,0,12"/></StackPanel>
 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Options">
 <TextBlock x:Name="InputLabel"/><TextBox x:Name="ValueInput" Padding="7" Margin="0,4,0,9"/>
+<TextBlock x:Name="SelectionCount" Foreground="#74DCC7" Margin="0,0,0,6"/>
+<StackPanel x:Name="ApplicationActions"><TextBlock Text="ACTIONS" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="InstallUpgradeButton" Content="Install/Upgrade Applications"/><Button x:Name="UninstallButton" Content="Uninstall Applications"/><Button x:Name="UpgradeAllButton" Content="Upgrade all Applications"/><TextBlock Text="SELECTION" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="ShowInstalledButton" Content="Show Installed Apps"/><Button x:Name="ClearSelectionButton" Content="Clear Selection"/></StackPanel>
 <CheckBox x:Name="OptionOne"/><CheckBox x:Name="OptionTwo"/>
 <Border x:Name="NoticeBorder" Background="#1A2938" Padding="12" Margin="0,10,0,8"><TextBlock x:Name="Notice" Foreground="#ADC0D2"/></Border>
 </StackPanel></ScrollViewer>
@@ -59,14 +61,16 @@ $script:lastPage = 'Runbook'
 </Grid></Window>
 '@
 $script:window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
-foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenGuide','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
+foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenGuide','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
 function Show-Page {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet('Runbook','Audit','Applications','Cleanup','Health','Dell')][string]$Page)
+    param([Parameter(Mandatory)][ValidateSet('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')][string]$Page)
     $script:lastPage = $Page
+    $ApplicationActions.Visibility = if ($Page -eq 'Applications') { 'Visible' } else { 'Collapsed' }
+    $SelectionCount.Visibility = if ($Page -eq 'Applications') { 'Visible' } else { 'Collapsed' }
     $ValueInput.Visibility = 'Collapsed'; $InputLabel.Visibility = 'Collapsed'; $OptionOne.Visibility = 'Collapsed'; $OptionTwo.Visibility = 'Collapsed'; $NoticeBorder.Visibility = 'Visible'; $Preview.Visibility = 'Visible'; $Apply.Visibility = 'Visible'
     switch ($Page) {
         'Runbook' {
@@ -82,8 +86,8 @@ function Show-Page {
         }
         'Applications' {
             $Heading.Text = 'WinGet application updates'; $Description.Text = 'Preview all detected application updates, then install only exact package IDs you select.'; $Access.Text = 'Applications only. Dell drivers, BIOS and firmware are excluded.'
-            $InputLabel.Text = 'Exact application IDs, comma separated'; $InputLabel.Visibility = 'Visible'; $ValueInput.Visibility = 'Visible'; $ValueInput.Text = ''
-            $Notice.Text = 'Preview first. Unknown-version, pinned, forced, automatic-all, agreement auto-acceptance and automatic reboot options are not used.'; $Preview.Content = 'Preview updates'; $Apply.Content = 'Install selected apps…'
+            $InputLabel.Text = 'Selected exact application IDs, comma separated'; $InputLabel.Visibility = 'Visible'; $ValueInput.Visibility = 'Visible'; $ValueInput.Text = ''
+            $SelectionCount.Text = 'Selected Apps: 0'; $Notice.Text = 'Use the action buttons to install or upgrade selected IDs, uninstall selected IDs, upgrade all supported applications, or show the installed list.'; $Preview.Visibility = 'Collapsed'; $Apply.Visibility = 'Collapsed'
         }
         'Cleanup' {
             $Heading.Text = 'Pre-backup cleanup'; $Description.Text = 'Measure and remove old regular files only from the user and Windows temporary folders.'; $Access.Text = 'Actual cleanup requires a successful Windows health check in this dashboard session.'
@@ -96,6 +100,10 @@ function Show-Page {
             $Heading.Text = 'Windows health'; $Description.Text = 'Run component-store, protected-file and online file-system checks; repair only when selected.'; $Access.Text = 'Administrator permission required. AC power and a quiet maintenance window are checked.'
             $OptionOne.Content = 'After successful repair checks, clean superseded Windows components'; $OptionOne.Visibility = 'Visible'; $OptionOne.IsChecked = $false
             $Notice.Text = 'Run the check first. Repairs may need a restart. No automatic restart occurs, and the irreversible component base-reset option is never used.'; $Preview.Content = 'Run health checks'; $Apply.Content = 'Repair Windows…'
+        }
+        'SystemRepair' {
+            $Heading.Text = 'System Corruption Scan'; $Description.Text = 'Run the WinUtil-style disk, protected-file and Windows image repair sequence.'; $Access.Text = 'Administrator permission required. The scan may repair Windows files and DISM may request a restart.'
+            $Notice.Text = 'Runs chkdsk /scan /perf, sfc /scannow, then dism /online /cleanup-image /restorehealth. Every command is logged and no automatic restart occurs.'; $Preview.Visibility = 'Collapsed'; $Apply.Content = 'Run corruption scan…'
         }
         'Dell' {
             $Heading.Text = 'Dell drivers and firmware'; $Description.Text = 'Show installed BIOS information and open the official Dell G5 5590 support page.'; $Access.Text = 'Separate weekly, attended review. No update is downloaded or installed.'
@@ -113,12 +121,13 @@ function Get-CleanupAge {
 function Start-DashboardTask {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='The UI confirms changes and the underlying scripts enforce their own safeguards.')]
     [CmdletBinding()]
-    param([switch]$ApplyChanges)
+    param([switch]$ApplyChanges, [string]$RequestedAction)
     try {
         if ($script:active -and -not $script:active.HasExited) { throw 'Finish the running task first.' }
         $task = $script:lastPage
         $request = @{ Task = $task }
         $requiresAdmin = $false
+        $mutationRequested = [bool]$ApplyChanges -or $RequestedAction -in @('Install','Uninstall','UpgradeAll')
         switch ($script:lastPage) {
             'Runbook' {
                 if (-not $ApplyChanges) { return }
@@ -128,7 +137,15 @@ function Start-DashboardTask {
             }
             'Audit' { $requiresAdmin = $true }
             'Applications' {
-                if ($ApplyChanges) {
+                if ($RequestedAction -eq 'Installed') {
+                    $request.Task = 'InstalledApps'
+                } elseif ($RequestedAction -eq 'UpgradeAll') {
+                    $request.Task = 'UpdateAll'
+                } elseif ($RequestedAction -eq 'Uninstall') {
+                    $ids = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    if ($ids.Count -eq 0) { throw 'Select at least one exact application ID to uninstall.' }
+                    $request.Task = 'UpdateUninstall'; $request.ApplicationId = $ids
+                } elseif ($RequestedAction -eq 'Install') {
                     $ids = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
                     if ($ids.Count -eq 0) { throw 'Preview the list, then enter at least one exact application ID.' }
                     $request.Task = 'UpdateInstall'; $request.ApplicationId = $ids
@@ -147,9 +164,13 @@ function Start-DashboardTask {
                 if ($ApplyChanges) { $request.Task = 'HealthRepair'; $request.ComponentCleanup = [bool]$OptionOne.IsChecked }
                 else { $request.Task = 'HealthCheck' }
             }
+            'SystemRepair' {
+                $requiresAdmin = $true
+                $request.Task = 'SystemRepair'
+            }
             'Dell' { $request.Task = 'DellReview' }
         }
-        if ($ApplyChanges) {
+        if ($mutationRequested) {
             $choice = [Windows.MessageBox]::Show($window, "Apply the selected $($Heading.Text.ToLowerInvariant()) action? Save work, close applications, connect AC power, and confirm no backup or update is running.", 'Confirm maintenance', 'YesNo', 'Warning')
             if ($choice -ne 'Yes') { return }
         }
@@ -174,8 +195,10 @@ function Start-DashboardTask {
         $Console.Text = "Running $($request.Task)…`r`nResults: $runDirectory"; $Status.Text = 'Running'
     } catch { [void][Windows.MessageBox]::Show($window, $_.Exception.Message, 'Unable to start', 'OK', 'Error') }
 }
-$RunbookButton.Add_Click({ Show-Page Runbook }); $AuditButton.Add_Click({ Show-Page Audit }); $ApplicationsButton.Add_Click({ Show-Page Applications }); $CleanupButton.Add_Click({ Show-Page Cleanup }); $HealthButton.Add_Click({ Show-Page Health }); $DellButton.Add_Click({ Show-Page Dell })
+$RunbookButton.Add_Click({ Show-Page Runbook }); $AuditButton.Add_Click({ Show-Page Audit }); $ApplicationsButton.Add_Click({ Show-Page Applications }); $CleanupButton.Add_Click({ Show-Page Cleanup }); $HealthButton.Add_Click({ Show-Page Health }); $SystemRepairButton.Add_Click({ Show-Page SystemRepair }); $DellButton.Add_Click({ Show-Page Dell })
 $Preview.Add_Click({ Start-DashboardTask }); $Apply.Add_Click({ Start-DashboardTask -ApplyChanges })
+$InstallUpgradeButton.Add_Click({ Start-DashboardTask -RequestedAction Install }); $UninstallButton.Add_Click({ Start-DashboardTask -RequestedAction Uninstall }); $UpgradeAllButton.Add_Click({ Start-DashboardTask -RequestedAction UpgradeAll }); $ShowInstalledButton.Add_Click({ Start-DashboardTask -RequestedAction Installed }); $ClearSelectionButton.Add_Click({ $ValueInput.Text = '' })
+$ValueInput.Add_TextChanged({ if ($script:lastPage -eq 'Applications') { $count = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }); $SelectionCount.Text = "Selected Apps: $($count.Count)" } })
 $OpenResults.Add_Click({ if ($script:sessionDirectory) { Start-Process -FilePath explorer.exe -ArgumentList ('"' + $script:sessionDirectory + '"') } else { [void][Windows.MessageBox]::Show('Run a task first.') } })
 $OpenGuide.Add_Click({ Start-Process -FilePath (Join-Path -Path $root -ChildPath 'README.md') })
 $timer = [Windows.Threading.DispatcherTimer]::new(); $timer.Interval = [timespan]::FromMilliseconds(700)
@@ -189,7 +212,7 @@ $timer.Add_Tick({
             $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
             if (Test-Path -LiteralPath $finishedPath) {
                 $finished = Get-Content -LiteralPath $finishedPath -Raw | ConvertFrom-Json
-                if ($finished.Task -in @('HealthCheck','HealthRepair','PreBackupRun')) { $script:healthReady = [bool]$finished.HealthReady }
+                if ($finished.Task -in @('HealthCheck','HealthRepair','SystemRepair','PreBackupRun')) { $script:healthReady = [bool]$finished.HealthReady }
                 if ($finished.RestartRequired) {
                     $script:healthReady = $false
                     $Status.Text = 'RESTART REQUIRED - stop before cleanup or backup'
@@ -214,7 +237,7 @@ $window.Add_ContentRendered({
 })
 Show-Page -Page $UiPage
 if ($UiTestOutput) {
-    foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','Dell')) { Show-Page -Page $page; if ($Heading.Text.Length -eq 0) { throw "Page failed: $page" } }
+    foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')) { Show-Page -Page $page; if ($Heading.Text.Length -eq 0) { throw "Page failed: $page" } }
     Show-Page -Page $UiPage
     if ($UiPage -eq 'Cleanup') {
         foreach ($invalid in @('0','6','366','1.5','abc')) { $ValueInput.Text = $invalid; $rejected = $false; try { Get-CleanupAge | Out-Null } catch { $rejected = $true }; if (-not $rejected) { throw "Invalid age accepted: $invalid" } }
@@ -224,5 +247,6 @@ if ($UiTestOutput) {
     $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1080,740,96,96,[Windows.Media.PixelFormats]::Pbgra32); $bitmap.Render($surface)
     $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new(); $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
     $stream = [IO.File]::Create([IO.Path]::GetFullPath($UiTestOutput)); try { $encoder.Save($stream) } finally { $stream.Dispose() }
-    Write-Output 'PASS: six dashboard pages rendered and cleanup input limits were validated. No maintenance ran.'
+    Write-Output 'PASS: seven dashboard pages rendered and cleanup input limits were validated. No maintenance ran.'
 } else { $timer.Start(); try { [void]$window.ShowDialog() } finally { $timer.Stop() } }
+

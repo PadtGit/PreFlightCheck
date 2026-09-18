@@ -118,6 +118,50 @@ function Get-AgedTemporaryFile {
     }
 }
 
+function Remove-TemporaryFileByHandle {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if ($null -eq ('PreBackup.NativeFile' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace PreBackup {
+    public static class NativeFile {
+        private const uint Delete = 0x00010000;
+        private const uint ShareRead = 0x00000001;
+        private const uint ShareWrite = 0x00000002;
+        private const uint ShareDelete = 0x00000004;
+        private const uint OpenExisting = 3;
+        private const uint OpenReparsePoint = 0x00200000;
+        private const int FileDispositionInfoEx = 21;
+        private const uint DeleteFlag = 0x00000001;
+        private const uint IgnoreReadonlyFlag = 0x00000010;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetFileInformationByHandle(IntPtr handle, int infoClass, ref uint info, uint size);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        public static void DeleteByHandle(string path) {
+            IntPtr handle = CreateFile(path, Delete, ShareRead | ShareWrite | ShareDelete, IntPtr.Zero, OpenExisting, OpenReparsePoint, IntPtr.Zero);
+            if (handle == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try {
+                uint disposition = DeleteFlag | IgnoreReadonlyFlag;
+                if (!SetFileInformationByHandle(handle, FileDispositionInfoEx, ref disposition, sizeof(uint))) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+            } finally { CloseHandle(handle); }
+        }
+    }
+}
+'@ -ErrorAction Stop
+    }
+    [PreBackup.NativeFile]::DeleteByHandle($Path)
+}
+
 function Remove-AgedTemporaryFile {
     <#
     .SYNOPSIS
@@ -135,7 +179,9 @@ function Remove-AgedTemporaryFile {
             $cutoff = (Get-Date).ToUniversalTime().AddDays(-$MinimumAgeDays)
             if ($item.PSIsContainer -or $item.LastWriteTimeUtc -ge $cutoff -or $item.CreationTimeUtc -ge $cutoff) { $skipped++; continue }
             $length = $item.Length
-            Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
+            # Delete through an opened file handle so the final operation targets the
+            # object that was opened, rather than resolving a second path target.
+            Remove-TemporaryFileByHandle -Path $item.FullName
             $deleted++; $bytes += $length
         } catch { $failed++; Write-Warning "Skipped $($candidate.Path): $($_.Exception.Message)" }
     }
@@ -143,3 +189,4 @@ function Remove-AgedTemporaryFile {
 }
 
 Export-ModuleMember -Function Get-PendingRestartState, Get-AcPowerState, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile
+

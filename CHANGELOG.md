@@ -7,3 +7,10 @@
 - Added explicit checks that the default workflow does not delete shadow copies or reset the Windows Update cache.
 - Added verification for `ShouldProcess`, `-WhatIf`, terminating orchestration errors, native exit-code handling, AC-line detection, and reparse-point-aware cleanup.
 - Kept the existing safe `Audit` default and explicit cleanup/repair modes.
+
+## 0.3.0 - 2026-09-18
+
+- Updated the GitHub Actions test dependency from Pester 5.7.1 to Pester 6.2.0.
+- Added a separate WinUtil-style System Corruption Scan action while keeping the existing Windows Health workflow.
+- Added distinct WinGet actions for install/upgrade, uninstall, upgrade-all, installed-app listing, and clearing selection.
+
