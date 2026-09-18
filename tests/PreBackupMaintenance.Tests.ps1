@@ -43,10 +43,43 @@ Describe 'PreBackupMaintenance safety contract' {
         $coreText | Should -Match 'OnAC = \$status\.ACLineStatus -eq 1'
     }
 
+    It 'keeps the existing health scan and adds the WinUtil-style corruption scan commands' {
+        $maintenanceText | Should -Match "Mode -eq 'SystemRepair'"
+        $maintenanceText | Should -Match 'chkdsk /scan /perf'
+        $maintenanceText | Should -Match 'sfc /scannow'
+        $maintenanceText | Should -Match 'dism /online /cleanup-image /restorehealth'
+        $maintenanceText | Should -Match 'SystemRepair'
+    }
+
+    It 'supports the requested Winget action modes' {
+        $maintenanceText | Should -Match '\$Uninstall'
+        $maintenanceText | Should -Match '\$UpgradeAll'
+        $maintenanceText | Should -Match '\$ShowInstalled'
+        $maintenanceText | Should -Match "'uninstall'"
+        $maintenanceText | Should -Match "'upgrade','--all'"
+        $maintenanceText | Should -Match "'list'"
+    }
+
+    It 'exposes the new dashboard actions without removing existing pages' {
+        $dashboardText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Start-Maintenance.ps1') -Raw
+        $workerText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Invoke-GuiTask.ps1') -Raw
+        $dashboardText | Should -Match 'System Corruption Scan - Run'
+        $dashboardText | Should -Match 'Install/Upgrade Applications'
+        $dashboardText | Should -Match 'Uninstall Applications'
+        $dashboardText | Should -Match 'Upgrade all Applications'
+        $dashboardText | Should -Match 'Show Installed Apps'
+        $dashboardText | Should -Match 'Clear Selection'
+        $dashboardText | Should -Match "'Health'"
+        $workerText | Should -Match 'SystemRepair'
+        $workerText | Should -Match 'UpdateUninstall'
+        $workerText | Should -Match 'UpdateAll'
+        $workerText | Should -Match 'InstalledApps'
+    }
+
     It 'validates containment and skips reparse points before deleting files' {
         $coreText | Should -Match 'Test-ContainedRegularPath'
         $coreText | Should -Match 'ReparsePoint'
-        $coreText | Should -Match 'Remove-Item -LiteralPath'
+        $coreText | Should -Match 'DeleteByHandle'
         $coreText | Should -Match 'Revalidates and removes individual aged temporary files'
     }
 }
@@ -85,3 +118,4 @@ Describe 'Maintenance.Core isolated filesystem behavior' {
         $result.Skipped | Should -BeGreaterThan 0
     }
 }
+

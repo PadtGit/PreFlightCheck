@@ -21,7 +21,7 @@ jobs:
         shell: pwsh
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -ErrorAction Stop
+          Install-Module -Name Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Force -ErrorAction Stop
           Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -ErrorAction Stop
           Get-Module -ListAvailable Pester, PSScriptAnalyzer |
             Sort-Object Name, Version -Descending |
@@ -69,3 +69,4 @@ jobs:
           name: pester-results
           path: test-results.xml
           if-no-files-found: ignore
+
