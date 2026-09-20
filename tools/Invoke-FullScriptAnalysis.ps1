@@ -29,12 +29,36 @@ if ($LASTEXITCODE -ne 0 -or $paths.Count -eq 0)
 {
     throw 'Cannot obtain the repository PowerShell file inventory.'
 }
-$analysisErrors = @()
+$analysisErrors = [System.Collections.Generic.List[object]]::new()
+$maximumAnalyzerAttempts = 3
 $findings = @(
     foreach ($path in $paths)
     {
-        Invoke-ScriptAnalyzer -Path (Join-Path -Path $root -ChildPath $path) -Settings $settingsPath `
-            -IncludeSuppressed -ErrorAction Continue -ErrorVariable +analysisErrors
+        $pathFindings = @()
+        foreach ($attempt in 1..$maximumAnalyzerAttempts)
+        {
+            $pathErrors = @()
+            $pathFindings = @(
+                Invoke-ScriptAnalyzer -Path (Join-Path -Path $root -ChildPath $path) -Settings $settingsPath `
+                    -IncludeSuppressed -ErrorAction Continue -ErrorVariable +pathErrors
+            )
+            if ($pathErrors.Count -eq 0)
+            {
+                break
+            }
+            if ($attempt -eq $maximumAnalyzerAttempts)
+            {
+                foreach ($pathError in $pathErrors)
+                {
+                    $analysisErrors.Add([pscustomobject]@{
+                            Path = $path
+                            Attempts = $attempt
+                            Message = $pathError.Exception.Message
+                        })
+                }
+            }
+        }
+        $pathFindings
     }
 )
 $findings | Select-Object -Property RuleName, Severity, ScriptName, Line, Column, Message, IsSuppressed |
@@ -82,5 +106,4 @@ if ($releaseBlockingFindings.Count -gt 0 -or $analysisErrors.Count -gt 0)
 {
     throw 'Release-blocking analyzer findings or engine errors remain. See ValidationReport.'
 }
-
 
