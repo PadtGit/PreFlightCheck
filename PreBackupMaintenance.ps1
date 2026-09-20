@@ -71,6 +71,7 @@ if (($RepairWindows -or $ComponentCleanup) -and $Mode -ne 'Health') { throw 'Rep
 if (($Uninstall -or $UpgradeAll -or $ShowInstalled) -and $Mode -ne 'Updates') { throw 'Winget action switches require Updates mode.' }
 if (($ApplicationId.Count -gt 0 -or $OpenUpdatePages) -and $Mode -ne 'Updates') { throw 'Update switches require Updates mode.' }
 if (($Uninstall -or $ApplicationId.Count -gt 0) -and $Mode -eq 'Updates' -and -not $MaintenanceWindowConfirmed -and -not $WhatIfPreference) { throw 'Selected application changes require -MaintenanceWindowConfirmed.' }
+if ($Uninstall -and $ApplicationId.Count -eq 0) { throw 'Uninstall requires at least one exact application ID.' }
 foreach ($id in $ApplicationId) {
     if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]*$') { throw "Invalid exact application ID: $id" }
     if ($id -match '^(Dell|Alienware)\.' -or $id -match '(BIOS|Firmware)') { throw 'Manage Dell and firmware updates separately using Weekly-DellReview.ps1.' }
@@ -296,13 +297,25 @@ try {
             }
             if ($ShowInstalled -and $PSCmdlet.ShouldProcess('Installed applications', 'List installed WinGet applications')) {
                 [void](Invoke-LoggedProgram -Name InstalledApps -FilePath $wingetPath -Arguments @('list','--disable-interactivity'))
+                $installedOutputPath = Join-Path -Path $runDirectory -ChildPath 'InstalledApps.txt'
+                $installedOutput = Get-Content -LiteralPath $installedOutputPath -Raw -ErrorAction Stop
+                if ([string]::IsNullOrWhiteSpace($installedOutput)) {
+                    Add-Result -Step InstalledAppsOutput -Status Review -Detail 'WinGet returned no installed-application output. Review InstalledApps.txt.'
+                } else {
+                    Add-Result -Step InstalledAppsOutput -Status Observed -Detail $installedOutput.Trim()
+                }
             }
             if ($UpgradeAll -and $PSCmdlet.ShouldProcess('All supported applications', 'Upgrade all WinGet applications')) {
                 [void](Invoke-LoggedProgram -Name UpgradeAll -FilePath $wingetPath -Arguments @('upgrade','--all','--disable-interactivity'))
+                $upgradeAllRestart = Get-PendingRestartState
+                if ($upgradeAllRestart.Pending -or $upgradeAllRestart.Unknown.Count -gt 0) {
+                    $report.RestartRequired = $true
+                    Add-Result -Step RestartAfterUpgradeAll -Status Review -Detail 'RESTART REQUIRED: an upgrade-all operation left a pending or unknown restart state. Restart before cleanup or backup.'
+                }
             }
             foreach ($id in $ApplicationId) {
                 if ($PSCmdlet.ShouldProcess($id, $(if ($Uninstall) { 'Uninstall selected exact WinGet application' } else { 'Install or upgrade selected exact WinGet application' }))) {
-                    $wingetAction = if ($Uninstall) { @('uninstall','--id',$id,'--exact','--disable-interactivity') } else { @('install','--id',$id,'--exact','--upgrade','--disable-interactivity') }
+                    $wingetAction = if ($Uninstall) { @('uninstall','--id',$id,'--exact','--disable-interactivity') } else { @('install','--id',$id,'--exact','--disable-interactivity') }
                     $actionName = if ($Uninstall) { 'Uninstall' } else { 'InstallUpgrade' }
                     [void](Invoke-LoggedProgram -Name "$actionName-$id" -FilePath $wingetPath -Arguments $wingetAction)
                     $restartAfterUpdate = Get-PendingRestartState
