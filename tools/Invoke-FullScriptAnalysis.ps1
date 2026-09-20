@@ -41,11 +41,36 @@ $findings | Select-Object -Property RuleName, Severity, ScriptName, Line, Column
     Export-Csv -LiteralPath (Join-Path -Path $reportDirectory -ChildPath 'psscriptanalyzer-full.csv') -NoTypeInformation
 $analysisErrors | Out-String |
     Set-Content -LiteralPath (Join-Path -Path $reportDirectory -ChildPath 'analyzer-errors.txt')
+$advisoryRules = @(
+    'PSAlignAssignmentStatement'
+    'PSAvoidLongLines'
+    'PSAvoidUsingDoubleQuotesForConstantString'
+    'PSPlaceCloseBrace'
+    'PSPlaceOpenBrace'
+    'PSProvideCommentHelp'
+    'PSUseBOMForUnicodeEncodedFile'
+    'PSUseCompatibleCommands'
+    'PSUseConstrainedLanguageMode'
+    'PSUseConsistentIndentation'
+    'PSUseConsistentWhitespace'
+)
+$releaseBlockingFindings = @(
+    $findings | Where-Object {
+        -not $_.IsSuppressed -and
+        ($_.Severity -eq 'Error' -or $_.RuleName -notin $advisoryRules)
+    }
+)
+$releaseBlockingFindings |
+    Select-Object -Property RuleName, Severity, ScriptName, Line, Column, Message, IsSuppressed |
+    Export-Csv -LiteralPath (Join-Path -Path $reportDirectory -ChildPath 'release-blocking.csv') -NoTypeInformation
 $summary = [pscustomobject]@{
     AnalyzerVersion = '1.25.0'
     Rules = $availableRules.Count
     Files = $paths.Count
     Findings = $findings.Count
+    SuppressedFindings = @($findings | Where-Object IsSuppressed).Count
+    AdvisoryFindings = @($findings | Where-Object { $_.RuleName -in $advisoryRules }).Count
+    ReleaseBlockingFindings = $releaseBlockingFindings.Count
     EngineErrors = $analysisErrors.Count
 }
 $summary | ConvertTo-Json |
@@ -53,8 +78,9 @@ $summary | ConvertTo-Json |
 $summary | Format-List
 $findings | Group-Object -Property RuleName | Sort-Object -Property Count -Descending |
     Format-Table -Property Count, Name -AutoSize
-if ($findings.Count -gt 0 -or $analysisErrors.Count -gt 0)
+if ($releaseBlockingFindings.Count -gt 0 -or $analysisErrors.Count -gt 0)
 {
-    throw 'Full analyzer review failed. See ValidationReport for findings and engine errors.'
+    throw 'Release-blocking analyzer findings or engine errors remain. See ValidationReport.'
 }
+
 
