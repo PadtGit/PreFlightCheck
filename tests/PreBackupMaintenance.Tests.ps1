@@ -1,9 +1,13 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification = 'Pester resolves variables assigned in BeforeAll inside later It blocks; static analysis does not follow that framework scope.')]
+param()
+
 BeforeAll {
     $repositoryRoot = Split-Path -Parent $PSScriptRoot
     $maintenanceScript = Join-Path $repositoryRoot 'PreBackupMaintenance.ps1'
     $coreModule = Join-Path $repositoryRoot 'Maintenance.Core.psm1'
     $maintenanceText = Get-Content -LiteralPath $maintenanceScript -Raw
     $coreText = Get-Content -LiteralPath $coreModule -Raw
+    $analysisText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Raw
 }
 
 Describe 'PreBackupMaintenance safety contract' {
@@ -120,6 +124,13 @@ Describe 'Maintenance.Core isolated filesystem behavior' {
 }
 
 Describe 'Release 0.3.0 regression contract' {
+    It 'keeps the full audit while gating release-blocking analyzer findings separately' {
+        $analysisText | Should -Match '\$advisoryRules'
+        $analysisText | Should -Match '\$releaseBlockingFindings'
+        $analysisText | Should -Match 'release-blocking\.csv'
+        $analysisText | Should -Match 'IsSuppressed'
+    }
+
     It 'does not pass the unsupported upgrade switch to winget install' {
         $maintenanceText | Should -Match ([regex]::Escape("'install','--id',`$id,'--exact','--disable-interactivity'"))
         $maintenanceText | Should -Not -Match ([regex]::Escape("'install','--id',`$id,'--exact','--upgrade'"))
