@@ -119,6 +119,7 @@ function Get-AgedTemporaryFile {
 }
 
 function Remove-TemporaryFileByHandle {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The exported Remove-AgedTemporaryFile caller performs the ShouldProcess check immediately before invoking this internal handle-level deletion helper.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if ($null -eq ('PreBackup.NativeFile' -as [type])) {
@@ -189,4 +190,5 @@ function Remove-AgedTemporaryFile {
 }
 
 Export-ModuleMember -Function Get-PendingRestartState, Get-AcPowerState, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile
+
 
