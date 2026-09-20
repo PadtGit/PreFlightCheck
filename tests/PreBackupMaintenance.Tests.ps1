@@ -1,9 +1,13 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification = 'Pester resolves variables assigned in BeforeAll inside later It blocks; static analysis does not follow that framework scope.')]
+param()
+
 BeforeAll {
     $repositoryRoot = Split-Path -Parent $PSScriptRoot
     $maintenanceScript = Join-Path $repositoryRoot 'PreBackupMaintenance.ps1'
     $coreModule = Join-Path $repositoryRoot 'Maintenance.Core.psm1'
     $maintenanceText = Get-Content -LiteralPath $maintenanceScript -Raw
     $coreText = Get-Content -LiteralPath $coreModule -Raw
+    $analysisText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Raw
 }
 
 Describe 'PreBackupMaintenance safety contract' {
@@ -116,6 +120,36 @@ Describe 'Maintenance.Core isolated filesystem behavior' {
         Test-Path -LiteralPath $script:oldFile | Should -BeTrue
         $result.Deleted | Should -Be 0
         $result.Skipped | Should -BeGreaterThan 0
+    }
+}
+
+Describe 'Release 0.3.0 regression contract' {
+    It 'keeps the full audit while gating release-blocking analyzer findings separately' {
+        $analysisText | Should -Match '\$advisoryRules'
+        $analysisText | Should -Match '\$releaseBlockingFindings'
+        $analysisText | Should -Match 'release-blocking\.csv'
+        $analysisText | Should -Match 'IsSuppressed'
+    }
+
+    It 'does not pass the unsupported upgrade switch to winget install' {
+        $maintenanceText | Should -Match ([regex]::Escape("'install','--id',`$id,'--exact','--disable-interactivity'"))
+        $maintenanceText | Should -Not -Match ([regex]::Escape("'install','--id',`$id,'--exact','--upgrade'"))
+    }
+
+    It 'rechecks pending restart state after upgrade-all' {
+        $upgradeAllIndex = $maintenanceText.IndexOf("Invoke-LoggedProgram -Name UpgradeAll")
+        $restartCheckIndex = $maintenanceText.IndexOf('$upgradeAllRestart = Get-PendingRestartState', $upgradeAllIndex)
+        $upgradeAllIndex | Should -BeGreaterThan -1
+        $restartCheckIndex | Should -BeGreaterThan $upgradeAllIndex
+    }
+
+    It 'rejects uninstall mode without selected application IDs' {
+        $maintenanceText | Should -Match ([regex]::Escape('if ($Uninstall -and $ApplicationId.Count -eq 0)'))
+    }
+
+    It 'preserves installed application output for the dashboard result' {
+        $maintenanceText | Should -Match "\$installedOutput = Get-Content"
+        $maintenanceText | Should -Match "InstalledApps\.txt"
     }
 }
 

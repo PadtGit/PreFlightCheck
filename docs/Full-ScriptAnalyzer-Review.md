@@ -10,13 +10,19 @@ Install PSScriptAnalyzer 1.25.0 first. GitHub installs that exact version.
 
 The settings select all 75 built-in rules returned by that version, explicitly enable
 configurable rules, exclude no rules, and include Error, Warning, and Information.
-The runner includes suppressed diagnostics and fails for any finding or analyzer
-engine error. It checks all Git-tracked and non-ignored new .ps1, .psm1, and .psd1
-files, including tests and the analysis runner itself.
+The runner includes suppressed diagnostics and checks all Git-tracked and
+non-ignored new .ps1, .psm1, and .psd1 files, including tests and the analysis
+runner itself. It fails the release gate for analyzer engine errors, Error-severity
+diagnostics, and unsuppressed correctness findings outside the documented advisory
+rule set. Formatting, historical compatibility-profile, Constrained Language Mode,
+encoding, and documentation diagnostics remain visible in the full audit without
+blocking a release.
 
 Reports are saved in ValidationReport: psscriptanalyzer-full.csv,
-analyzer-errors.txt, and analyzer-summary.json. GitHub uploads these even when the
-analysis step fails, as the psscriptanalyzer-full-review artifact.
+release-blocking.csv, analyzer-errors.txt, and analyzer-summary.json. GitHub uploads
+these even when the analysis step fails, as the psscriptanalyzer-full-review
+artifact. A zero-row release-blocking.csv means that the analyzer release gate
+passed; it does not mean that the advisory audit is empty.
 
 ## Compatibility and interpretation
 
@@ -44,4 +50,5 @@ Static analysis cannot prove runtime correctness or replace Pester and Windows t
 - [Using ScriptAnalyzer](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/using-scriptanalyzer?view=ps-modules)
 - [Compatibility cmdlet profiles](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/usecompatiblecmdlets?view=ps-modules)
 - [Constrained Language Mode checks](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/useconstrainedlanguagemode?view=ps-modules)
+
 
