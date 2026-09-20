@@ -13,7 +13,7 @@ $requestFile = Get-Item -LiteralPath $RequestPath -ErrorAction Stop
 $runDirectory = $requestFile.Directory.FullName
 $root = $PSScriptRoot
 $request = Get-Content -LiteralPath $requestFile.FullName -Raw | ConvertFrom-Json
-$allowedTasks = @('PreBackupRun','Audit','UpdatePreview','UpdateInstall','CleanPreview','Clean','HealthCheck','HealthRepair','DellReview')
+$allowedTasks = @('PreBackupRun','Audit','UpdatePreview','UpdateInstall','UpdateUninstall','UpdateAll','InstalledApps','CleanPreview','Clean','HealthCheck','HealthRepair','SystemRepair','DellReview')
 if ($request.Task -notin $allowedTasks) { throw 'Unknown dashboard task.' }
 $windowsPowerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $scriptPath = Join-Path -Path $root -ChildPath 'PreBackupMaintenance.ps1'
@@ -36,6 +36,13 @@ switch ($request.Task) {
         }
         $arguments += @('-Mode','Updates','-MaintenanceWindowConfirmed','-ApplicationId') + $ids
     }
+    'UpdateUninstall' {
+        $ids = @($request.ApplicationId)
+        if ($ids.Count -eq 0) { throw 'Select at least one exact application ID to uninstall.' }
+        $arguments += @('-Mode','Updates','-Uninstall','-MaintenanceWindowConfirmed','-ApplicationId') + $ids
+    }
+    'UpdateAll' { $arguments += @('-Mode','Updates','-UpgradeAll','-MaintenanceWindowConfirmed') }
+    'InstalledApps' { $arguments += @('-Mode','Updates','-ShowInstalled') }
     'CleanPreview' { $arguments += @('-Mode','Clean','-MinimumAgeDays',[string][int]$request.MinimumAgeDays,'-WhatIf') }
     'Clean' {
         $arguments += @('-Mode','Clean','-MinimumAgeDays',[string][int]$request.MinimumAgeDays,'-MaintenanceWindowConfirmed')
@@ -47,6 +54,7 @@ switch ($request.Task) {
         $arguments += @('-Mode','Health','-RepairWindows','-MaintenanceWindowConfirmed')
         if ($request.ComponentCleanup) { $arguments += '-ComponentCleanup' }
     }
+    'SystemRepair' { $arguments += @('-Mode','SystemRepair','-MaintenanceWindowConfirmed') }
     'DellReview' {
         $scriptPath = Join-Path -Path $root -ChildPath 'Weekly-DellReview.ps1'
         $arguments = @('-NoLogo','-NoProfile','-File',$scriptPath)
@@ -104,3 +112,4 @@ $sessionDirectory = $requestFile.Directory.Parent.FullName
 $sessionLog = Join-Path -Path $sessionDirectory -ChildPath 'session.log'
 @('', ('=' * 72), "Task: $($request.Task)", "Finished: $($finished.Finished)", "Exit code: $exitCode", "Restart required: $restartRequired", "Repair recommended: $repairRecommended", "Results: $runDirectory", '', $summary) | Add-Content -LiteralPath $sessionLog -Encoding UTF8
 exit $exitCode
+

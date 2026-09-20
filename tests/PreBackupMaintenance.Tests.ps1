@@ -1,9 +1,13 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification = 'Pester resolves variables assigned in BeforeAll inside later It blocks; static analysis does not follow that framework scope.')]
+param()
+
 BeforeAll {
     $repositoryRoot = Split-Path -Parent $PSScriptRoot
     $maintenanceScript = Join-Path $repositoryRoot 'PreBackupMaintenance.ps1'
     $coreModule = Join-Path $repositoryRoot 'Maintenance.Core.psm1'
     $maintenanceText = Get-Content -LiteralPath $maintenanceScript -Raw
     $coreText = Get-Content -LiteralPath $coreModule -Raw
+    $analysisText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Raw
 }
 
 Describe 'PreBackupMaintenance safety contract' {
@@ -43,10 +47,43 @@ Describe 'PreBackupMaintenance safety contract' {
         $coreText | Should -Match 'OnAC = \$status\.ACLineStatus -eq 1'
     }
 
+    It 'keeps the existing health scan and adds the WinUtil-style corruption scan commands' {
+        $maintenanceText | Should -Match "Mode -eq 'SystemRepair'"
+        $maintenanceText | Should -Match 'chkdsk /scan /perf'
+        $maintenanceText | Should -Match 'sfc /scannow'
+        $maintenanceText | Should -Match 'dism /online /cleanup-image /restorehealth'
+        $maintenanceText | Should -Match 'SystemRepair'
+    }
+
+    It 'supports the requested Winget action modes' {
+        $maintenanceText | Should -Match '\$Uninstall'
+        $maintenanceText | Should -Match '\$UpgradeAll'
+        $maintenanceText | Should -Match '\$ShowInstalled'
+        $maintenanceText | Should -Match "'uninstall'"
+        $maintenanceText | Should -Match "'upgrade','--all'"
+        $maintenanceText | Should -Match "'list'"
+    }
+
+    It 'exposes the new dashboard actions without removing existing pages' {
+        $dashboardText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Start-Maintenance.ps1') -Raw
+        $workerText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Invoke-GuiTask.ps1') -Raw
+        $dashboardText | Should -Match 'System Corruption Scan - Run'
+        $dashboardText | Should -Match 'Install/Upgrade Applications'
+        $dashboardText | Should -Match 'Uninstall Applications'
+        $dashboardText | Should -Match 'Upgrade all Applications'
+        $dashboardText | Should -Match 'Show Installed Apps'
+        $dashboardText | Should -Match 'Clear Selection'
+        $dashboardText | Should -Match "'Health'"
+        $workerText | Should -Match 'SystemRepair'
+        $workerText | Should -Match 'UpdateUninstall'
+        $workerText | Should -Match 'UpdateAll'
+        $workerText | Should -Match 'InstalledApps'
+    }
+
     It 'validates containment and skips reparse points before deleting files' {
         $coreText | Should -Match 'Test-ContainedRegularPath'
         $coreText | Should -Match 'ReparsePoint'
-        $coreText | Should -Match 'Remove-Item -LiteralPath'
+        $coreText | Should -Match 'DeleteByHandle'
         $coreText | Should -Match 'Revalidates and removes individual aged temporary files'
     }
 }
@@ -85,3 +122,36 @@ Describe 'Maintenance.Core isolated filesystem behavior' {
         $result.Skipped | Should -BeGreaterThan 0
     }
 }
+
+Describe 'Release 0.3.0 regression contract' {
+    It 'keeps the full audit while gating release-blocking analyzer findings separately' {
+        $analysisText | Should -Match '\$advisoryRules'
+        $analysisText | Should -Match '\$releaseBlockingFindings'
+        $analysisText | Should -Match 'release-blocking\.csv'
+        $analysisText | Should -Match 'IsSuppressed'
+        $analysisText | Should -Match '\$maximumAnalyzerAttempts = 3'
+        $analysisText | Should -Match '\$pathErrors'
+    }
+
+    It 'does not pass the unsupported upgrade switch to winget install' {
+        $maintenanceText | Should -Match ([regex]::Escape("'install','--id',`$id,'--exact','--disable-interactivity'"))
+        $maintenanceText | Should -Not -Match ([regex]::Escape("'install','--id',`$id,'--exact','--upgrade'"))
+    }
+
+    It 'rechecks pending restart state after upgrade-all' {
+        $upgradeAllIndex = $maintenanceText.IndexOf("Invoke-LoggedProgram -Name UpgradeAll")
+        $restartCheckIndex = $maintenanceText.IndexOf('$upgradeAllRestart = Get-PendingRestartState', $upgradeAllIndex)
+        $upgradeAllIndex | Should -BeGreaterThan -1
+        $restartCheckIndex | Should -BeGreaterThan $upgradeAllIndex
+    }
+
+    It 'rejects uninstall mode without selected application IDs' {
+        $maintenanceText | Should -Match ([regex]::Escape('if ($Uninstall -and $ApplicationId.Count -eq 0)'))
+    }
+
+    It 'preserves installed application output for the dashboard result' {
+        $maintenanceText | Should -Match "\$installedOutput = Get-Content"
+        $maintenanceText | Should -Match "InstalledApps\.txt"
+    }
+}
+
