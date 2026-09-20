@@ -129,6 +129,8 @@ Describe 'Release 0.3.0 regression contract' {
         $analysisText | Should -Match '\$releaseBlockingFindings'
         $analysisText | Should -Match 'release-blocking\.csv'
         $analysisText | Should -Match 'IsSuppressed'
+        $analysisText | Should -Match '\$maximumAnalyzerAttempts = 3'
+        $analysisText | Should -Match '\$pathErrors'
     }
 
     It 'does not pass the unsupported upgrade switch to winget install' {

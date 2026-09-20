@@ -18,6 +18,12 @@ rule set. Formatting, historical compatibility-profile, Constrained Language Mod
 encoding, and documentation diagnostics remain visible in the full audit without
 blocking a release.
 
+PSScriptAnalyzer can intermittently raise an internal null-reference error while
+loading command metadata on hosted Windows runners. The runner retries each file up
+to three times and records an engine error only when all attempts for that file
+fail. A successful retry replaces the incomplete attempt so findings are not
+duplicated.
+
 Reports are saved in ValidationReport: psscriptanalyzer-full.csv,
 release-blocking.csv, analyzer-errors.txt, and analyzer-summary.json. GitHub uploads
 these even when the analysis step fails, as the psscriptanalyzer-full-review
@@ -50,5 +56,4 @@ Static analysis cannot prove runtime correctness or replace Pester and Windows t
 - [Using ScriptAnalyzer](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/using-scriptanalyzer?view=ps-modules)
 - [Compatibility cmdlet profiles](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/usecompatiblecmdlets?view=ps-modules)
 - [Constrained Language Mode checks](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/useconstrainedlanguagemode?view=ps-modules)
-
 
