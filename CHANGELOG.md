@@ -16,5 +16,5 @@
 - Corrected selected-package WinGet arguments and rejected empty uninstall selections.
 - Rechecked restart state after upgrade-all and surfaced installed-app output in dashboard results.
 - Preserved the complete 75-rule analyzer audit while limiting the release gate to engine errors and actionable correctness findings.
-
+- Removed an invalid workflow file and enabled verification for pull requests targeting release branches.
 
