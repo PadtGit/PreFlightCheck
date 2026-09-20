@@ -13,4 +13,6 @@
 - Updated the GitHub Actions test dependency from Pester 5.7.1 to Pester 6.2.0.
 - Added a separate WinUtil-style System Corruption Scan action while keeping the existing Windows Health workflow.
 - Added distinct WinGet actions for install/upgrade, uninstall, upgrade-all, installed-app listing, and clearing selection.
+- Corrected selected-package WinGet arguments and rejected empty uninstall selections.
+- Rechecked restart state after upgrade-all and surfaced installed-app output in dashboard results.
 
