@@ -121,19 +121,19 @@ Describe 'Maintenance.Core isolated filesystem behavior' {
 
 Describe 'Release 0.3.0 regression contract' {
     It 'does not pass the unsupported upgrade switch to winget install' {
-        $maintenanceText | Should -Match "'install','--id',\$id,'--exact','--disable-interactivity'"
-        $maintenanceText | Should -Not -Match "'install','--id',\$id,'--exact','--upgrade'"
+        $maintenanceText | Should -Match ([regex]::Escape("'install','--id',`$id,'--exact','--disable-interactivity'"))
+        $maintenanceText | Should -Not -Match ([regex]::Escape("'install','--id',`$id,'--exact','--upgrade'"))
     }
 
     It 'rechecks pending restart state after upgrade-all' {
         $upgradeAllIndex = $maintenanceText.IndexOf("Invoke-LoggedProgram -Name UpgradeAll")
-        $restartCheckIndex = $maintenanceText.IndexOf("$upgradeAllRestart = Get-PendingRestartState", $upgradeAllIndex)
+        $restartCheckIndex = $maintenanceText.IndexOf('$upgradeAllRestart = Get-PendingRestartState', $upgradeAllIndex)
         $upgradeAllIndex | Should -BeGreaterThan -1
         $restartCheckIndex | Should -BeGreaterThan $upgradeAllIndex
     }
 
     It 'rejects uninstall mode without selected application IDs' {
-        $maintenanceText | Should -Match "if \(\$Uninstall -and \$ApplicationId\.Count -eq 0\)"
+        $maintenanceText | Should -Match ([regex]::Escape('if ($Uninstall -and $ApplicationId.Count -eq 0)'))
     }
 
     It 'preserves installed application output for the dashboard result' {
