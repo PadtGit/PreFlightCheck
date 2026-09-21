@@ -66,7 +66,8 @@ try {
     $repairRecommended = [bool]$health.RepairRecommended
     $healthReady = [bool]$health.HealthReady
     if ($restartRequired) { throw 'RESTART REQUIRED: restart Windows before cleanup or backup.' }
-    if ($repairRecommended -or -not $healthReady) { throw 'WINDOWS REPAIR RECOMMENDED: open the health report and run Repair Windows before cleanup.' }
+    if ($repairRecommended) { throw 'WINDOWS REPAIR RECOMMENDED: open the health report and run Repair Windows before cleanup.' }
+    if (-not $healthReady) { throw 'HEALTH REVIEW REQUIRED: open the health report, resolve its review conditions, then run normal Windows health checks before cleanup.' }
 
     [void](Invoke-RunStep -Name '03-WinGetPreview' -Arguments @('-Mode','Updates'))
     [void](Invoke-RunStep -Name '04-CleanupPreview' -Arguments @('-Mode','Clean','-MinimumAgeDays',[string]$MinimumAgeDays,'-WhatIf'))

@@ -202,8 +202,12 @@ try {
         }
     }
     if ($Mode -eq 'SystemRepair') {
+        $report.HealthReady = $false
         if ($PSCmdlet.ShouldProcess('Windows system', 'Run WinUtil-style system corruption scan and repair')) {
-            [void](Invoke-LoggedProgram -Name SystemRepair-CHKDSK -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','chkdsk /scan /perf') -AcceptedCodes @(0,1,2))
+            $diskCode = Invoke-LoggedProgram -Name SystemRepair-CHKDSK -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','chkdsk /scan /perf') -AcceptedCodes @(0,1,2)
+            if ($diskCode -in @(1,2)) {
+                Add-Result -Step SystemRepair-CHKDSK -Status Review -Detail "CHKDSK returned $diskCode. Review the saved disk log before further maintenance."
+            }
             [void](Invoke-LoggedProgram -Name SystemRepair-SFC -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','sfc /scannow'))
             $repairCode = Invoke-LoggedProgram -Name SystemRepair-DISM -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','dism /online /cleanup-image /restorehealth') -AcceptedCodes @(0,3010)
             if ($repairCode -eq 3010) {
@@ -212,12 +216,26 @@ try {
             } else {
                 Add-Result -Step SystemRepair -Status Completed -Detail 'WinUtil-style system corruption scan completed.'
             }
-            $report.HealthReady = -not $report.RestartRequired -and -not $report.Restart.Pending -and $report.Restart.Unknown.Count -eq 0
+            $report.RestartAfter = Get-PendingRestartState
+            if ($report.RestartAfter.Pending -or $report.RestartAfter.Unknown.Count -gt 0) {
+                $report.RestartRequired = $true
+                Add-Result -Step RestartAfterSystemRepair -Status Review -Detail 'RESTART REQUIRED: Windows reports a pending or unknown restart state after repair.'
+            }
+            Add-Result -Step HealthGate -Status Review -Detail 'Cleanup remains locked. Review the repair logs, restart if requested, then explicitly run Windows health checks before cleanup.'
         }
     }
     if ($Mode -eq 'Health') {
+        $report.HealthReady = $false
+        $analysisCompleted = $false
+        $integrityCompleted = $false
+        $healthVolumes = @($report.VolumesBefore | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter -and $_.FileSystem -eq 'NTFS' })
+        $volumeChecksCompleted = $healthVolumes.Count -gt 0
+        if (-not $volumeChecksCompleted) {
+            Add-Result -Step FileSystemChecks -Status Review -Detail 'No eligible fixed NTFS volume with a drive letter was available to check. Review the storage inventory before cleanup.'
+        }
         if ($PSCmdlet.ShouldProcess('Windows component store', 'Analyze space usage')) {
             [void](Invoke-LoggedProgram -Name ComponentAnalysis -FilePath "$env:SystemRoot\System32\DISM.exe" -Arguments @('/Online','/English','/Cleanup-Image','/AnalyzeComponentStore'))
+            $analysisCompleted = $true
         }
         $healthOperation = '/ScanHealth'
         $sfcOperation = '/verifyonly'
@@ -233,6 +251,7 @@ try {
             $componentHealthy = $healthText -match 'No component store corruption detected\.' -or ($RepairWindows -and $healthText -match 'The restore operation completed successfully\.')
             [void](Invoke-LoggedProgram -Name SFC -FilePath "$env:SystemRoot\System32\sfc.exe" -Arguments @($sfcOperation))
             $sfcText = Get-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'SFC.txt') -Raw
+            $integrityCompleted = $true
             $sfcHealthy = $sfcText -match 'Windows Resource Protection did not find any integrity violations\.'
             if ($RepairWindows) { $sfcHealthy = $sfcHealthy -or $sfcText -match 'Windows Resource Protection found corrupt files and successfully repaired them\.' }
             if (-not $componentHealthy -or -not $sfcHealthy) {
@@ -242,10 +261,13 @@ try {
                 Add-Result -Step Integrity -Status Observed -Detail 'DISM and SFC reported a healthy or successfully repaired Windows image. Native results cannot certify every application.'
             }
         }
-        foreach ($volume in @($report.VolumesBefore | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter -and $_.FileSystem -eq 'NTFS' })) {
+        foreach ($volume in $healthVolumes) {
             if ($PSCmdlet.ShouldProcess("$($volume.DriveLetter):", 'Online file-system scan; defer fixes')) {
-                [void](Invoke-LoggedProgram -Name "CHKDSK-$($volume.DriveLetter)" -FilePath "$env:SystemRoot\System32\chkdsk.exe" -Arguments @("$($volume.DriveLetter):",'/scan'))
-            }
+                $diskCode = Invoke-LoggedProgram -Name "CHKDSK-$($volume.DriveLetter)" -FilePath "$env:SystemRoot\System32\chkdsk.exe" -Arguments @("$($volume.DriveLetter):",'/scan') -AcceptedCodes @(0,1,2)
+                if ($diskCode -in @(1,2)) {
+                    Add-Result -Step "CHKDSK-$($volume.DriveLetter)" -Status Review -Detail "CHKDSK returned $diskCode. Review the saved disk log before cleanup."
+                }
+            } else { $volumeChecksCompleted = $false }
         }
         if ($ComponentCleanup -and $PSCmdlet.ShouldProcess('Windows component store', 'Remove superseded components; bypass normal cleanup grace period')) {
             if (-not $componentHealthy) { throw 'Component cleanup requires an explicit healthy or repaired DISM conclusion in this run. Review the log.' }
@@ -262,8 +284,12 @@ try {
             $report.RestartRequired = $true
             Add-Result -Step RestartAfterHealth -Status Review -Detail 'RESTART REQUIRED: Windows reports a pending or unknown restart state. Restart before cleanup or backup.'
         }
-        $report.HealthReady = -not $report.RepairRecommended -and -not $report.RestartRequired
+        $report.HealthReady = -not $WhatIfPreference -and -not $RepairWindows -and
+            $analysisCompleted -and $integrityCompleted -and $volumeChecksCompleted -and
+            -not $report.RepairRecommended -and -not $report.RestartRequired -and
+            @($report.Results | Where-Object { $_.Status -in @('Review','Failed') }).Count -eq 0
         if ($report.HealthReady) { Add-Result -Step HealthGate -Status Completed -Detail 'Health checks passed the cleanup gate for this session.' }
+        elseif ($RepairWindows) { Add-Result -Step HealthGate -Status Review -Detail 'Cleanup remains locked. Review the repair logs, restart if requested, then explicitly run Windows health checks before cleanup.' }
     }
     if ($Mode -eq 'Updates') {
         $uninstallRoots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
@@ -292,6 +318,12 @@ try {
             if (-not $ShowInstalled) {
                 try {
                     $updateExit = Invoke-LoggedProgram -Name AvailableAppUpdates -FilePath $wingetPath -Arguments @('upgrade','--disable-interactivity') -AcceptedCodes @(0,-1978335189)
+                    $availableOutput = Get-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'AvailableAppUpdates.txt') -Raw -ErrorAction Stop
+                    if ([string]::IsNullOrWhiteSpace($availableOutput)) {
+                        Add-Result -Step AvailableAppUpdatesOutput -Status Review -Detail 'WinGet returned no available-update output. Review AvailableAppUpdates.txt.'
+                    } else {
+                        Add-Result -Step AvailableAppUpdatesOutput -Status Observed -Detail $availableOutput.Trim()
+                    }
                     if ($updateExit -ne 0) { Add-Result -Step AppUpdates -Status Observed -Detail 'WinGet reports no applicable upgrades.' }
                 } catch { Add-Result -Step AppUpdates -Status Review -Detail $_.Exception.Message }
             }
@@ -319,7 +351,11 @@ try {
                     $actionName = if ($Uninstall) { 'Uninstall' } else { 'InstallUpgrade' }
                     [void](Invoke-LoggedProgram -Name "$actionName-$id" -FilePath $wingetPath -Arguments $wingetAction)
                     $restartAfterUpdate = Get-PendingRestartState
-                    if ($restartAfterUpdate.Pending -or $restartAfterUpdate.Unknown.Count -gt 0) { throw 'An application update left a pending or unknown restart state. Review and restart before further maintenance.' }
+                    if ($restartAfterUpdate.Pending -or $restartAfterUpdate.Unknown.Count -gt 0) {
+                        $report.RestartRequired = $true
+                        Add-Result -Step RestartAfterUpdate -Status Review -Detail 'RESTART REQUIRED: an application change left a pending or unknown restart state. Restart before cleanup or backup.'
+                        throw 'An application update left a pending or unknown restart state. Review and restart before further maintenance.'
+                    }
                 }
             }
         } else { Add-Result -Step AppUpdates -Status Review -Detail 'WinGet is unavailable. Use application updaters and Microsoft Store.' }
@@ -344,6 +380,9 @@ try {
                 }
             }
         } catch { Add-Result -Step FinalSpace -Status Review -Detail $_.Exception.Message }
+        if ($report.RestartRequired -or $report.RepairRecommended -or @($report.Results | Where-Object { $_.Status -in @('Review','Failed') }).Count -gt 0) {
+            $report.HealthReady = $false
+        }
         $report | ConvertTo-Json -Depth 8 | Out-File -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'report.json') -Encoding utf8 -WhatIf:$false
         $report.Results | Export-Csv -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'steps.csv') -NoTypeInformation -Encoding UTF8 -WhatIf:$false
         Write-Information -MessageData "Reports: $runDirectory. Review warnings and tool output; backup restorability is not certified." -InformationAction Continue

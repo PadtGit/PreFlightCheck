@@ -33,6 +33,7 @@ $script:runDirectory = $null
 $script:sessionDirectory = $null
 $script:taskNumber = 0
 $script:healthReady = $false
+$script:taskStatus = 'Ready'
 $script:lastPage = 'Runbook'
 [xml]$layout = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="780" MinWidth="940" MinHeight="650" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
@@ -65,6 +66,35 @@ foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','Application
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
+function Update-CleanupAvailability {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Updates only dashboard controls; maintenance retains its confirmation and execution guards.')]
+    [CmdletBinding()]
+    param()
+    $taskRunning = $script:active -and -not $script:active.HasExited
+    $Apply.IsEnabled = -not $taskRunning
+    if (-not $taskRunning) { $Status.Text = $script:taskStatus }
+    if ($script:lastPage -ne 'Cleanup') { return }
+    $Apply.IsEnabled = -not $taskRunning -and $script:healthReady
+    if ($script:healthReady) {
+        $Apply.Content = 'Clean reviewed items…'
+        $Access.Text = 'Health checks passed in this session. Preview cleanup and review the results before applying changes.'
+    } else {
+        $Apply.Content = 'Cleanup locked'
+        $Access.Text = 'CLEANUP LOCKED: Run normal Windows health checks successfully before applying cleanup. Preview is available.'
+        if (-not $taskRunning) {
+            if ($Status.Text -match '^(RESTART REQUIRED|WINDOWS REPAIR RECOMMENDED|NEEDS ATTENTION|REVIEW)') {
+                $Status.Text = 'CLEANUP LOCKED - ' + $Status.Text
+            } else {
+                $Status.Text = 'CLEANUP LOCKED - run Windows health checks first'
+            }
+        }
+    }
+}
+function Show-DashboardWarning {
+    [CmdletBinding()]
+    param([string]$Message, [string]$Title, [ValidateSet('Stop','Warning')][string]$Icon)
+    [void][Windows.MessageBox]::Show($window, $Message, $Title, 'OK', $Icon)
+}
 function Show-Page {
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')][string]$Page)
@@ -85,9 +115,9 @@ function Show-Page {
             $Notice.Text = 'This is an assessment. A clean report cannot guarantee that every file, application, or backup is healthy.'; $Preview.Content = 'Run system review'; $Apply.Visibility = 'Collapsed'
         }
         'Applications' {
-            $Heading.Text = 'WinGet application updates'; $Description.Text = 'Preview all detected application updates, then install only exact package IDs you select.'; $Access.Text = 'Applications only. Dell drivers, BIOS and firmware are excluded.'
+            $Heading.Text = 'WinGet application updates'; $Description.Text = 'Preview updates and choose exact package IDs for selected actions. Upgrade all applies to all WinGet-eligible packages.'; $Access.Text = 'Upgrade all may include vendor utilities or driver packages. Review drivers and firmware separately; avoid Upgrade all if unsure.'
             $InputLabel.Text = 'Selected exact application IDs, comma separated'; $InputLabel.Visibility = 'Visible'; $ValueInput.Visibility = 'Visible'; $ValueInput.Text = ''
-            $SelectionCount.Text = 'Selected Apps: 0'; $Notice.Text = 'Use the action buttons to install or upgrade selected IDs, uninstall selected IDs, upgrade all supported applications, or show the installed list.'; $Preview.Visibility = 'Collapsed'; $Apply.Visibility = 'Collapsed'
+            $SelectionCount.Text = 'Selected Apps: 0'; $Notice.Text = 'Selected actions use the exact IDs you enter. Upgrade all uses WinGet eligibility and does not apply the selected-ID Dell/firmware exclusions.'; $Preview.Content = 'Preview available updates'; $Apply.Visibility = 'Collapsed'
         }
         'Cleanup' {
             $Heading.Text = 'Pre-backup cleanup'; $Description.Text = 'Measure and remove old regular files only from the user and Windows temporary folders.'; $Access.Text = 'Actual cleanup requires a successful Windows health check in this dashboard session.'
@@ -99,17 +129,18 @@ function Show-Page {
         'Health' {
             $Heading.Text = 'Windows health'; $Description.Text = 'Run component-store, protected-file and online file-system checks; repair only when selected.'; $Access.Text = 'Administrator permission required. AC power and a quiet maintenance window are checked.'
             $OptionOne.Content = 'After successful repair checks, clean superseded Windows components'; $OptionOne.Visibility = 'Visible'; $OptionOne.IsChecked = $false
-            $Notice.Text = 'Run the check first. Repairs may need a restart. No automatic restart occurs, and the irreversible component base-reset option is never used.'; $Preview.Content = 'Run health checks'; $Apply.Content = 'Repair Windows…'
+            $Notice.Text = 'Run the check first. After repair, review the logs, restart if requested, then explicitly run health checks again to unlock cleanup. No automatic restart or irreversible component base reset occurs.'; $Preview.Content = 'Run health checks'; $Apply.Content = 'Repair Windows…'
         }
         'SystemRepair' {
             $Heading.Text = 'System Corruption Scan'; $Description.Text = 'Run the WinUtil-style disk, protected-file and Windows image repair sequence.'; $Access.Text = 'Administrator permission required. The scan may repair Windows files and DISM may request a restart.'
-            $Notice.Text = 'Runs chkdsk /scan /perf, sfc /scannow, then dism /online /cleanup-image /restorehealth. Every command is logged and no automatic restart occurs.'; $Preview.Visibility = 'Collapsed'; $Apply.Content = 'Run corruption scan…'
+            $Notice.Text = 'Runs chkdsk /scan /perf, sfc /scannow, then dism /online /cleanup-image /restorehealth. Review the logs, restart if requested, then run Windows health checks to unlock cleanup. No automatic restart occurs.'; $Preview.Visibility = 'Collapsed'; $Apply.Content = 'Run corruption scan…'
         }
         'Dell' {
             $Heading.Text = 'Dell drivers and firmware'; $Description.Text = 'Show installed BIOS information and open the official Dell G5 5590 support page.'; $Access.Text = 'Separate weekly, attended review. No update is downloaded or installed.'
             $Notice.Text = 'Before a BIOS update: verify a backup, connect AC, close apps, have the BitLocker recovery key available, and follow the exact Dell package instructions.'; $Preview.Content = 'Open Dell review'; $Apply.Visibility = 'Collapsed'
         }
     }
+    Update-CleanupAvailability
 }
 function Get-CleanupAge {
     [CmdletBinding()]
@@ -206,25 +237,36 @@ $timer.Add_Tick({
     if (-not $script:active) { return }
     try {
         if ($script:active.HasExited) {
+            $completedRequestPath = Join-Path -Path $runDirectory -ChildPath 'request.json'
+            if (Test-Path -LiteralPath $completedRequestPath) {
+                $completedRequest = Get-Content -LiteralPath $completedRequestPath -Raw | ConvertFrom-Json
+                if ($completedRequest.Task -in @('HealthCheck','HealthRepair','SystemRepair','PreBackupRun')) { $script:healthReady = $false }
+            }
             $summaryPath = Join-Path -Path $runDirectory -ChildPath 'summary.txt'
             $Console.Text = if (Test-Path -LiteralPath $summaryPath) { Get-Content -LiteralPath $summaryPath -Raw } else { 'NEEDS ATTENTION - no summary was saved.' }
-            $Console.ScrollToHome(); $Status.Text = ($Console.Text -split '\r?\n')[0]
+            $Console.ScrollToHome(); $script:taskStatus = ($Console.Text -split '\r?\n')[0]; $Status.Text = $script:taskStatus
             $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
             if (Test-Path -LiteralPath $finishedPath) {
                 $finished = Get-Content -LiteralPath $finishedPath -Raw | ConvertFrom-Json
-                if ($finished.Task -in @('HealthCheck','HealthRepair','SystemRepair','PreBackupRun')) { $script:healthReady = [bool]$finished.HealthReady }
+                if ($finished.Task -in @('HealthRepair','SystemRepair')) { $script:healthReady = $false }
+                elseif ($finished.Task -in @('HealthCheck','PreBackupRun')) {
+                    $script:healthReady = [bool]$finished.HealthReady -and $finished.ExitCode -eq 0
+                }
                 if ($finished.RestartRequired) {
                     $script:healthReady = $false
                     $Status.Text = 'RESTART REQUIRED - stop before cleanup or backup'
-                    [void][Windows.MessageBox]::Show($window, 'Restart Windows before running cleanup or starting the Veeam backup. After restarting, open the dashboard and begin a new guided run.', 'Restart required', 'OK', 'Stop')
+                    $script:taskStatus = $Status.Text
+                    Show-DashboardWarning -Message 'Restart Windows before running cleanup or starting the Veeam backup. After restarting, open the dashboard and begin a new guided run.' -Title 'Restart required' -Icon Stop
                 } elseif ($finished.RepairRecommended) {
                     $script:healthReady = $false
                     $Status.Text = 'WINDOWS REPAIR RECOMMENDED - cleanup remains locked'
-                    [void][Windows.MessageBox]::Show($window, 'Windows health checks recommend repair or manual review. Open the saved results and run Repair Windows before cleanup.', 'Repair recommended', 'OK', 'Warning')
+                    $script:taskStatus = $Status.Text
+                    Show-DashboardWarning -Message 'Windows health checks recommend repair or manual review. Open the saved results and run Repair Windows before cleanup.' -Title 'Repair recommended' -Icon Warning
                 }
             }
             $script:active.Dispose(); $script:active = $null
-            $Tasks.IsEnabled = $true; $Options.IsEnabled = $true; $Preview.IsEnabled = $true; $Apply.IsEnabled = $true
+            $Tasks.IsEnabled = $true; $Options.IsEnabled = $true; $Preview.IsEnabled = $true
+            Update-CleanupAvailability
         }
     } catch { $Status.Text = 'Waiting for result…' }
 })

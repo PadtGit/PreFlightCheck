@@ -2,7 +2,7 @@
 
 **Clean system, smaller backup, faster restore.**
 
-Version: `0.2.0`
+Version: `0.3.1`
 
 Windows 11 pre-backup maintenance toolkit — integrity checks, disk cleanup, and health reports before your Veeam job runs.
 
@@ -43,16 +43,18 @@ Run maintenance during a separate quiet window, review the reports, and finish a
 | `Update-Applications.ps1` | Application update helper |
 | `Weekly-DellReview.ps1` | Dell G5 5590 review helper |
 
-Dashboard results are saved under `GuiRuns/`; every dashboard launch gets one timestamped session folder and one combined `session.log`. Each task also keeps its detailed `report.json`, `steps.csv`, console output, and native-tool logs. Direct command-line runs default to `Reports/`. Generated reports can contain local paths and system information and are excluded from version control.
+Dashboard results are saved under `GuiRuns/<session>/`. The combined `session.log` is at the session root. Each task folder contains `console.txt`, `summary.txt`, and `finished.json`; its maintenance reports and native-tool logs are under `Report/<timestamp>/`. Guided runs keep their step reports under the task's `GuidedReport/` folder. Direct command-line runs default to `Reports/`. Generated reports can contain local paths and system information and are excluded from version control.
 
-The **WinGet applications** page includes separate buttons for Install/Upgrade selected IDs, Uninstall selected IDs, Upgrade all applications, Show Installed Apps, and Clear Selection. The installed-app list is displayed in the dashboard result area and saved with the task report.
+The **WinGet applications** page includes **Preview available updates**, Install/Upgrade selected IDs, Uninstall selected IDs, Upgrade all applications, Show Installed Apps, and Clear Selection. The available-update and installed-app lists appear in the dashboard result area. Their full output stays in `AvailableAppUpdates.txt` and `InstalledApps.txt` inside the task's `Report/<timestamp>/` folder; the displayed output also feeds the session log. Preview does not install updates.
+
+Selected actions use the exact IDs you choose. **Upgrade all applications** runs `winget upgrade --all` for all WinGet-eligible packages and does not apply the selected-ID Dell/firmware exclusions. It may include vendor utilities or driver packages. Review drivers and firmware separately, and avoid Upgrade all if unsure.
 
 ## Recommended order
 
 1. Restart Windows if Windows Update or another installer is waiting for a restart.
 2. Save your work, close applications, connect AC power, and make sure there is no backup or update already running.
 3. In the dashboard, choose **Run pre-backup sequence**. It runs System Review and Windows Health before any cleanup. If Windows repair or a restart is required, it stops and clearly blocks cleanup.
-4. After a repair, restart when requested and begin a new guided run. The successful sequence previews application updates and cleanup, performs the confirmed cleanup, and finishes with another System Review.
+4. After either **Repair Windows** or **System Corruption Scan**, review the logs and restart when requested. Then explicitly run **Windows health → Run health checks**, or begin a new guided run that performs that normal check. Repair completion never unlocks cleanup. CHKDSK exit codes 1 and 2 require review. The successful guided sequence previews application updates and cleanup, performs the confirmed cleanup, and finishes with another System Review.
 
 The individual command-line routines remain available for attended troubleshooting. Run health checks before updates and cleanup:
 
@@ -82,7 +84,7 @@ The individual command-line routines remain available for attended troubleshooti
    .\Update-Applications.ps1 -ApplicationId Microsoft.PowerToys -Install
    ```
 
-   Repeat `-ApplicationId` as a comma-separated list when needed. The script does not use automatic all-package updating, unknown-version updates, forced updates, agreement auto-acceptance, or automatic reboot. WinGet is for applications here; keep drivers and firmware in the Dell workflow.
+   Repeat `-ApplicationId` as a comma-separated list when needed. All-package updating requires the separate, explicit Upgrade all applications action and may include vendor utilities or driver packages; avoid it if unsure. The script does not use unknown-version updates, forced updates, agreement auto-acceptance, or automatic reboot. Review drivers and firmware separately in the Dell workflow.
 
 8. Preview cleanup before making changes:
 
@@ -114,7 +116,7 @@ The individual command-line routines remain available for attended troubleshooti
 
 ## What the report means
 
-Each dashboard launch creates a combined `session.log`, plus a unique task folder containing `report.json`, `steps.csv`, and relevant native-tool logs. The GUI shows a dedicated warning when Windows needs repair or restart and keeps cleanup locked until a health task reports ready. Exit code 0 means the requested routine completed without recorded warnings; 1 means a failed or unavailable essential check; 2 means review is needed. These results cannot prove that every application is healthy, that no malware exists, or that a backup is restorable. Test backup recovery separately.
+The combined `session.log` lives at the dashboard session root; `report.json`, `steps.csv`, and native-tool logs live under each task's `Report/<timestamp>/` folder (or its `GuidedReport/` step folders for a guided run). The GUI shows a dedicated warning when Windows needs repair or restart. Cleanup displays **CLEANUP LOCKED** and disables its apply button until a completed normal Health Check reports ready with no review, failure, or restart conditions; cleanup preview remains available. Health readiness requires at least one eligible fixed NTFS volume with a drive letter to be checked. A `-WhatIf` run and either repair action cannot satisfy that gate; repair completion records a review instruction to run the normal check. Exit code 0 means the requested routine completed without recorded warnings; 1 means a failed or unavailable essential check; 2 means review is needed. These results cannot prove that every application is healthy, that no malware exists, or that a backup is restorable. Test backup recovery separately.
 
 Deleting files from the source may not reduce an incremental backup by the same amount, because backup retention and stored restore points still consume space. Use the script before a backup for maintenance and measurement, then use the backup application's supported retention or compact operation when older backup chains need to shrink.
 

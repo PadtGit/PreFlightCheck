@@ -1,12 +1,20 @@
 # Changelog
 
-## 0.2.0 - P0 safety verification
+## 0.3.1 - 2026-09-20
 
-- Added isolated Pester coverage for the pre-backup safety contract.
-- Added GitHub Actions verification on Windows with pinned Pester and PSScriptAnalyzer versions.
-- Added explicit checks that the default workflow does not delete shadow copies or reset the Windows Update cache.
-- Added verification for `ShouldProcess`, `-WhatIf`, terminating orchestration errors, native exit-code handling, AC-line detection, and reparse-point-aware cleanup.
-- Kept the existing safe `Audit` default and explicit cleanup/repair modes.
+- Kept cleanup locked after either repair action; the operator must explicitly run the normal Windows Health Check after reviewing repair logs and restarting if requested.
+- Required completed health diagnostics with no review, failure, or restart conditions before reporting health readiness; preview-only health runs cannot unlock cleanup.
+- Required at least one eligible fixed NTFS volume to be checked; empty or unsupported storage inventories now produce a review result and keep cleanup locked.
+- Made the dashboard cleanup lock explicit, disabled its apply action until health is ready, and retained cleanup preview and restart/repair warnings during refresh.
+- Invalidated health readiness again before saving reports so late inventory warnings cannot bypass the guided cleanup gate.
+- Distinguished a blocked health review from a repair recommendation in the guided run, preserving the actual repair flag.
+- Classified CHKDSK exit codes 1 and 2 as review-required and rechecked restart state after System Corruption Scan.
+- Cleared stale dashboard health readiness after repair or unsuccessful health tasks, including a worker that exits without saving its completion result.
+- Restored the visible Preview available updates action and displayed its saved WinGet list in the dashboard result area while preserving full logs.
+- Clarified Upgrade all package scope and documented the actual session/task report locations.
+- Recorded the restart-required flag before stopping selected WinGet changes when a pending or unknown restart is detected, so the dashboard also blocks cleanup.
+- Added fixture-driven behavior regressions for health eligibility, preview reachability/output, and retained exact WinGet arguments and restart checks. No maintenance commands run in these tests.
+- Preserved report schemas, exit-code meanings, explicit update confirmation, and the existing full analyzer audit and release gate.
 
 ## 0.3.0 - 2026-09-20
 
@@ -18,4 +26,12 @@
 - Preserved the complete 75-rule analyzer audit while limiting the release gate to engine errors and actionable correctness findings.
 - Removed an invalid workflow file and enabled verification for pull requests targeting release branches.
 - Retried transient PSScriptAnalyzer engine failures per file while preserving a hard failure after three unsuccessful attempts.
+
+## 0.2.0 - P0 safety verification
+
+- Added isolated Pester coverage for the pre-backup safety contract.
+- Added GitHub Actions verification on Windows with pinned Pester and PSScriptAnalyzer versions.
+- Added explicit checks that the default workflow does not delete shadow copies or reset the Windows Update cache.
+- Added verification for `ShouldProcess`, `-WhatIf`, terminating orchestration errors, native exit-code handling, AC-line detection, and reparse-point-aware cleanup.
+- Kept the existing safe `Audit` default and explicit cleanup/repair modes.
 
