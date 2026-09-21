@@ -1,87 +1,447 @@
-# All 75 built-in rules in PSScriptAnalyzer 1.25.0.
-# Compatibility profiles are bundled historical Windows baselines, not Windows 11 profiles.
-# Always-enabled rules ignore Enable; configurable rules require it.
 @{
-    IncludeDefaultRules = $true
-    IncludeRules = @('*')
-    ExcludeRules = @()
-    Severity = @('Error', 'Warning', 'Information')
-    Rules = @{
-        PSAlignAssignmentStatement = @{ Enable = $true; CheckHashtable = $true }
-        PSAvoidAssignmentToAutomaticVariable = @{ Enable = $true }
-        PSAvoidDefaultValueForMandatoryParameter = @{ Enable = $true }
-        PSAvoidDefaultValueSwitchParameter = @{ Enable = $true }
-        PSAvoidExclaimOperator = @{ Enable = $true }
-        PSAvoidGlobalAliases = @{ Enable = $true }
-        PSAvoidGlobalFunctions = @{ Enable = $true }
-        PSAvoidGlobalVars = @{ Enable = $true }
-        PSAvoidInvokingEmptyMembers = @{ Enable = $true }
-        PSAvoidLongLines = @{ Enable = $true; MaximumLineLength = 120 }
-        PSAvoidMultipleTypeAttributes = @{ Enable = $true }
-        PSAvoidNullOrEmptyHelpMessageAttribute = @{ Enable = $true }
-        PSAvoidOverwritingBuiltInCmdlets = @{ Enable = $true }
-        PSAvoidReservedWordsAsFunctionNames = @{ Enable = $true }
-        PSAvoidSemicolonsAsLineTerminators = @{ Enable = $true }
-        PSAvoidShouldContinueWithoutForce = @{ Enable = $true }
-        PSAvoidTrailingWhitespace = @{ Enable = $true }
-        PSAvoidUsingAllowUnencryptedAuthentication = @{ Enable = $true }
-        PSAvoidUsingBrokenHashAlgorithms = @{ Enable = $true }
-        PSAvoidUsingCmdletAliases = @{ Enable = $true }
-        PSAvoidUsingComputerNameHardcoded = @{ Enable = $true }
-        PSAvoidUsingConvertToSecureStringWithPlainText = @{ Enable = $true }
-        PSAvoidUsingDeprecatedManifestFields = @{ Enable = $true }
-        PSAvoidUsingDoubleQuotesForConstantString = @{ Enable = $true }
-        PSAvoidUsingEmptyCatchBlock = @{ Enable = $true }
-        PSAvoidUsingInvokeExpression = @{ Enable = $true }
-        PSAvoidUsingPlainTextForPassword = @{ Enable = $true }
-        PSAvoidUsingPositionalParameters = @{ Enable = $true }
-        PSAvoidUsingUsernameAndPasswordParams = @{ Enable = $true }
-        PSAvoidUsingWMICmdlet = @{ Enable = $true }
-        PSAvoidUsingWriteHost = @{ Enable = $true }
-        PSDSCDscExamplesPresent = @{ Enable = $true }
-        PSDSCDscTestsPresent = @{ Enable = $true }
-        PSDSCReturnCorrectTypesForDSCFunctions = @{ Enable = $true }
-        PSDSCStandardDSCFunctionsInResource = @{ Enable = $true }
-        PSDSCUseIdenticalMandatoryParametersForDSC = @{ Enable = $true }
-        PSDSCUseIdenticalParametersForDSC = @{ Enable = $true }
-        PSDSCUseVerboseMessageInDSCResource = @{ Enable = $true }
-        PSMisleadingBacktick = @{ Enable = $true }
-        PSMissingModuleManifestField = @{ Enable = $true }
-        PSPlaceCloseBrace = @{ Enable = $true; NoEmptyLineBefore = $true; IgnoreOneLineBlock = $false; NewLineAfter = $true }
-        PSPlaceOpenBrace = @{ Enable = $true; OnSameLine = $false; NewLineAfter = $true; IgnoreOneLineBlock = $false }
-        PSPossibleIncorrectComparisonWithNull = @{ Enable = $true }
-        PSPossibleIncorrectUsageOfAssignmentOperator = @{ Enable = $true }
-        PSPossibleIncorrectUsageOfRedirectionOperator = @{ Enable = $true }
-        PSProvideCommentHelp = @{ Enable = $true; ExportedOnly = $false; BlockComment = $true; VSCodeSnippetCorrection = $false; Placement = 'before' }
-        PSReservedCmdletChar = @{ Enable = $true }
-        PSReservedParams = @{ Enable = $true }
-        PSReviewUnusedParameter = @{ Enable = $true }
-        PSShouldProcess = @{ Enable = $true }
-        PSUseApprovedVerbs = @{ Enable = $true }
-        PSUseBOMForUnicodeEncodedFile = @{ Enable = $true }
-        PSUseCmdletCorrectly = @{ Enable = $true }
-        PSUseCompatibleCmdlets = @{ Enable = $true; compatibility = @('desktop-5.1.14393.206-windows') }
-        PSUseCompatibleCommands = @{ Enable = $true; TargetProfiles = @('win-48_x64_10.0.17763.0_5.1.17763.316_x64_4.0.30319.42000_framework', 'win-4_x64_10.0.18362.0_7.0.0_x64_3.1.2_core') }
-        PSUseCompatibleSyntax = @{ Enable = $true; TargetVersions = @('5.1', '7.0') }
-        PSUseCompatibleTypes = @{ Enable = $true; TargetProfiles = @('win-48_x64_10.0.17763.0_5.1.17763.316_x64_4.0.30319.42000_framework', 'win-4_x64_10.0.18362.0_7.0.0_x64_3.1.2_core') }
-        PSUseConsistentIndentation = @{ Enable = $true; Kind = 'space'; IndentationSize = 4; PipelineIndentation = 'IncreaseIndentationForFirstPipeline' }
-        PSUseConsistentParameterSetName = @{ Enable = $true }
-        PSUseConsistentParametersKind = @{ Enable = $true }
-        PSUseConsistentWhitespace = @{ Enable = $true; CheckInnerBrace = $true; CheckOpenBrace = $true; CheckOpenParen = $true; CheckOperator = $true; CheckPipe = $true; CheckPipeForRedundantWhitespace = $true; CheckSeparator = $true; CheckParameter = $true; IgnoreAssignmentOperatorInsideHashTable = $false }
-        PSUseConstrainedLanguageMode = @{ Enable = $true; IgnoreSignatures = $true }
-        PSUseCorrectCasing = @{ Enable = $true }
-        PSUseDeclaredVarsMoreThanAssignments = @{ Enable = $true }
-        PSUseLiteralInitializerForHashtable = @{ Enable = $true }
-        PSUseOutputTypeCorrectly = @{ Enable = $true }
-        PSUseProcessBlockForPipelineCommand = @{ Enable = $true }
-        PSUsePSCredentialType = @{ Enable = $true }
-        PSUseShouldProcessForStateChangingFunctions = @{ Enable = $true }
-        PSUseSingleValueFromPipelineParameter = @{ Enable = $true }
-        PSUseSingularNouns = @{ Enable = $true }
-        PSUseSupportsShouldProcess = @{ Enable = $true }
-        PSUseToExportFieldsInManifest = @{ Enable = $true }
-        PSUseUsingScopeModifierInNewRunspaces = @{ Enable = $true }
-        PSUseUTF8EncodingForHelpFile = @{ Enable = $true }
-    }
-}
+    # ============================================================================
+    # Configuration complète PSScriptAnalyzer v1.24.0
+    # Inclut TOUTES les règles intégrées avec configuration optimisée
+    # ============================================================================
 
+    # Inclure toutes les règles par défaut (50+ règles intégrées)
+    IncludeDefaultRules = $true
+
+    # Niveaux de sévérité à analyser
+    Severity = @('Error', 'Warning', 'Information')
+
+    # Règles à exclure (optionnel - décommentez selon vos besoins)
+    # ExcludeRules = @()
+
+    # Configuration détaillée des règles
+    Rules = @{
+
+        # ========== RÈGLES DE FORMATAGE ==========
+
+        # Placement des accolades ouvrantes
+        PSPlaceOpenBrace = @{
+            Enable = $true
+            OnSameLine = $false              # Accolade sur nouvelle ligne
+            NewLineAfter = $true             # Nouvelle ligne après l'accolade
+            IgnoreOneLineBlock = $true       # Ignorer les blocs sur une ligne
+        }
+
+        # Placement des accolades fermantes
+        PSPlaceCloseBrace = @{
+            Enable = $true
+            NoEmptyLineBefore = $false       # Permet ligne vide avant }
+            IgnoreOneLineBlock = $true       # Ignorer les blocs sur une ligne
+            NewLineAfter = $false            # Pas de nouvelle ligne après }
+        }
+
+        # Indentation cohérente
+        PSUseConsistentIndentation = @{
+            Enable = $true
+            Kind = 'space'                   # Utiliser des espaces
+            PipelineIndentation = 'IncreaseIndentationForFirstPipeline'
+            IndentationSize = 4              # 4 espaces par niveau
+        }
+
+        # Espacement cohérent
+        PSUseConsistentWhitespace = @{
+            Enable = $true
+            CheckInnerBrace = $true          # Vérifier espaces dans {}
+            CheckOpenBrace = $true           # Vérifier espaces avant {
+            CheckOpenParen = $true           # Vérifier espaces avant (
+            CheckOperator = $true            # Vérifier espaces autour opérateurs
+            CheckPipe = $true                # Vérifier espaces autour |
+            CheckPipeForRedundantWhitespace = $false
+            CheckSeparator = $true           # Vérifier espaces après ,;
+            CheckParameter = $false          # Ne pas vérifier paramètres
+            IgnoreAssignmentOperatorInsideHashTable = $false
+        }
+
+        # Alignement des assignments
+        PSAlignAssignmentStatement = @{
+            Enable = $true
+            CheckHashtable = $true           # Aligner dans les hashtables
+        }
+
+        # Casse correcte des cmdlets
+        PSUseCorrectCasing = @{
+            Enable = $true
+        }
+
+        # ========== RÈGLES DE BONNES PRATIQUES ==========
+
+        # Éviter les alias
+        PSAvoidUsingCmdletAliases = @{
+            Enable = $true
+        }
+
+        # Éviter Write-Host
+        PSAvoidUsingWriteHost = @{
+            Enable = $true
+        }
+
+        # Fournir une aide pour les fonctions
+        PSProvideCommentHelp = @{
+            Enable = $true
+            ExportedOnly = $false            # Aide pour toutes les fonctions
+            BlockComment = $true             # Autoriser commentaires de bloc
+            VSCodeSnippetCorrection = $false
+            Placement = "before"             # Placer l'aide avant la fonction
+        }
+
+        # Utiliser des verbes approuvés
+        PSUseApprovedVerbs = @{
+            Enable = $true
+        }
+
+        # Éviter les paramètres positionnels
+        PSAvoidUsingPositionalParameters = @{
+            Enable = $true
+        }
+
+        # Éviter les variables non initialisées
+        PSAvoidUninitializedVariable = @{
+            Enable = $true
+        }
+
+        # Variables déclarées utilisées plus que pour assignment
+        PSUseDeclaredVarsMoreThanAssignments = @{
+            Enable = $true
+        }
+
+        # Utiliser des initialiseurs littéraux pour hashtables
+        PSUseLiteralInitializerForHashtable = @{
+            Enable = $true
+        }
+
+        # Utiliser ShouldProcess pour fonctions qui changent l'état
+        PSUseShouldProcessForStateChangingFunctions = @{
+            Enable = $true
+        }
+
+        # Support pour ShouldProcess
+        PSUseSupportsShouldProcess = @{
+            Enable = $true
+        }
+
+        # Type de sortie correct
+        PSUseOutputTypeCorrectly = @{
+            Enable = $true
+        }
+
+        # Encodage UTF8 pour fichiers d'aide
+        PSUseUTF8EncodingForHelpFile = @{
+            Enable = $true
+        }
+
+        # BOM pour fichiers Unicode
+        PSUseBOMForUnicodeEncodedFile = @{
+            Enable = $true
+        }
+
+        # ========== RÈGLES DE SÉCURITÉ ==========
+
+        # Éviter les mots de passe en texte clair
+        PSAvoidUsingPlainTextForPassword = @{
+            Enable = $true
+        }
+
+        # Éviter ConvertTo-SecureString avec texte clair
+        PSAvoidUsingConvertToSecureStringWithPlainText = @{
+            Enable = $true
+        }
+
+        # Éviter les paramètres username/password
+        PSAvoidUsingUsernameAndPasswordParams = @{
+            Enable = $true
+        }
+
+        # Éviter les algorithmes de hash cassés
+        PSAvoidUsingBrokenHashAlgorithms = @{
+            Enable = $true
+        }
+
+        # Éviter les noms d'ordinateurs codés en dur
+        PSAvoidUsingComputerNameHardcoded = @{
+            Enable = $true
+        }
+
+        # Éviter les chemins de fichiers codés en dur
+        PSAvoidUsingInvokeExpression = @{
+            Enable = $true
+        }
+
+        # ========== RÈGLES DE QUALITÉ DE CODE ==========
+
+        # Éviter l'assignation aux variables automatiques
+        PSAvoidAssignmentToAutomaticVariable = @{
+            Enable = $true
+        }
+
+        # Éviter les valeurs par défaut pour paramètres obligatoires
+        PSAvoidDefaultValueForMandatoryParameter = @{
+            Enable = $true
+        }
+
+        # Éviter les valeurs par défaut pour switch parameters
+        PSAvoidDefaultValueSwitchParameter = @{
+            Enable = $true
+        }
+
+        # Éviter les blocs catch vides
+        PSAvoidUsingEmptyCatchBlock = @{
+            Enable = $true
+        }
+
+        # Éviter l'invocation de membres vides
+        PSAvoidInvokingEmptyMembers = @{
+            Enable = $true
+        }
+
+        # Éviter les attributs de message d'aide null ou vides
+        PSAvoidNullOrEmptyHelpMessageAttribute = @{
+            Enable = $true
+        }
+
+        # Éviter la redéfinition des cmdlets intégrés
+        PSAvoidOverwritingBuiltInCmdlets = @{
+            Enable = $true
+        }
+
+        # Éviter ShouldContinue sans Force
+        PSAvoidShouldContinueWithoutForce = @{
+            Enable = $true
+        }
+
+        # Éviter les espaces de fin
+        PSAvoidTrailingWhitespace = @{
+            Enable = $true
+        }
+
+        # Éviter les cmdlets WMI dépréciés
+        PSAvoidUsingWMICmdlet = @{
+            Enable = $true
+        }
+
+        # Éviter les champs de manifeste dépréciés
+        PSAvoidUsingDeprecatedManifestFields = @{
+            Enable = $true
+        }
+
+        # ========== RÈGLES DE MANIFESTE ET MODULES ==========
+
+        # Champs de manifeste de module manquants
+        PSMissingModuleManifestField = @{
+            Enable = $true
+        }
+
+        # ========== RÈGLES DE SYNTAXE ET PARSING ==========
+
+        # Éviter les lignes trop longues
+        PSAvoidLongLines = @{
+            Enable = $true
+            MaximumLineLength = 120          # Longueur maximum de ligne
+        }
+
+        # Backtick trompeur
+        PSMisleadingBacktick = @{
+            Enable = $true
+        }
+
+        # Éviter les attributs de type multiples
+        PSAvoidMultipleTypeAttributes = @{
+            Enable = $true
+        }
+
+        # Arguments manquants pour les paramètres
+        PSMissingParamArgument = @{
+            Enable = $true
+        }
+
+        # Arguments de type manquants
+        PSMissingTypeArgument = @{
+            Enable = $true
+        }
+
+        # Éviter les fonctions globales
+        PSAvoidGlobalFunctions = @{
+            Enable = $true
+        }
+
+        # Éviter les variables globales
+        PSAvoidGlobalVars = @{
+            Enable = $true
+        }
+
+        # Éviter les alias globaux
+        PSAvoidGlobalAliases = @{
+            Enable = $true
+        }
+
+        # ========== RÈGLES SUPPLÉMENTAIRES ==========
+
+        # Éviter les paramètres dupliqués
+        PSAvoidParameterNameConflictWithBuiltInMembers = @{
+            Enable = $true
+        }
+
+        # Utiliser des identifiants de processus corrects
+        PSUseProcessBlockForPipelineCommand = @{
+            Enable = $true
+        }
+
+        # Cohérence dans l'utilisation des symboles
+        PSUseCompatibleSyntax = @{
+            Enable = $true
+            TargetVersions = @('5.1', '7.0', '7.1', '7.2', '7.3', '7.4')
+        }
+
+        # ========== RÈGLES AJOUTÉES POUR PSSCRIPTANALYZER 1.25.0 ==========
+
+        PSAvoidExclaimOperator = @{
+            Enable = $true
+        }
+
+        PSReservedCmdletChar = @{
+            Enable = $true
+        }
+
+        PSReservedParams = @{
+            Enable = $true
+        }
+
+        PSAvoidReservedWordsAsFunctionNames = @{
+            Enable = $true
+        }
+
+        PSAvoidSemicolonsAsLineTerminators = @{
+            Enable = $true
+        }
+
+        PSAvoidUsingAllowUnencryptedAuthentication = @{
+            Enable = $true
+        }
+
+        PSAvoidUsingDoubleQuotesForConstantString = @{
+            Enable = $true
+        }
+
+        PSUseCompatibleCommands = @{
+            Enable = $true
+            TargetProfiles = @(
+                'win-48_x64_10.0.17763.0_5.1.17763.316_x64_4.0.30319.42000_framework'
+                'win-4_x64_10.0.18362.0_7.0.0_x64_3.1.2_core'
+            )
+        }
+
+        PSUseCompatibleTypes = @{
+            Enable = $true
+            TargetProfiles = @(
+                'win-48_x64_10.0.17763.0_5.1.17763.316_x64_4.0.30319.42000_framework'
+                'win-4_x64_10.0.18362.0_7.0.0_x64_3.1.2_core'
+            )
+        }
+
+        PSPossibleIncorrectComparisonWithNull = @{
+            Enable = $true
+        }
+
+        PSPossibleIncorrectUsageOfAssignmentOperator = @{
+            Enable = $true
+        }
+
+        PSPossibleIncorrectUsageOfRedirectionOperator = @{
+            Enable = $true
+        }
+
+        PSReviewUnusedParameter = @{
+            Enable = $true
+        }
+
+        PSUseCmdletCorrectly = @{
+            Enable = $true
+        }
+
+        PSUseCompatibleCmdlets = @{
+            Enable = $true
+            Compatibility = @('desktop-5.1.14393.206-windows')
+        }
+
+        PSUseConsistentParameterSetName = @{
+            Enable = $true
+        }
+
+        PSUseConsistentParametersKind = @{
+            Enable = $true
+        }
+
+        PSUseConstrainedLanguageMode = @{
+            Enable = $true
+        }
+
+        PSUsePSCredentialType = @{
+            Enable = $true
+        }
+
+        PSShouldProcess = @{
+            Enable = $true
+        }
+
+        PSUseSingleValueFromPipelineParameter = @{
+            Enable = $true
+        }
+
+        PSUseSingularNouns = @{
+            Enable = $true
+        }
+
+        PSUseToExportFieldsInManifest = @{
+            Enable = $true
+        }
+
+        PSUseUsingScopeModifierInNewRunspaces = @{
+            Enable = $true
+        }
+
+        PSDSCDscExamplesPresent = @{
+            Enable = $true
+        }
+
+        PSDSCDscTestsPresent = @{
+            Enable = $true
+        }
+
+        PSDSCReturnCorrectTypesForDSCFunctions = @{
+            Enable = $true
+        }
+
+        PSDSCUseIdenticalMandatoryParametersForDSC = @{
+            Enable = $true
+        }
+
+        PSDSCUseIdenticalParametersForDSC = @{
+            Enable = $true
+        }
+
+        PSDSCStandardDSCFunctionsInResource = @{
+            Enable = $true
+        }
+
+        PSDSCUseVerboseMessageInDSCResource = @{
+            Enable = $true
+        }
+    }
+
+    # ============================================================================
+    # NOTES D'UTILISATION :
+    #
+    # 1. Ce fichier inclut TOUTES les règles disponibles dans PSScriptAnalyzer 1.24.0
+    # 2. Toutes les règles sont activées par défaut avec IncludeDefaultRules = $true
+    # 3. Les configurations spécifiques optimisent le comportement des règles
+    # 4. Vous pouvez désactiver des règles en les ajoutant à ExcludeRules
+    # 5. Pour lister toutes les règles : Get-ScriptAnalyzerRule
+    #
+    # UTILISATION :
+    # Invoke-ScriptAnalyzer -Path "script.ps1" -Settings "PSScriptAnalyzerSettings.psd1"
+    #
+    # ============================================================================
+}

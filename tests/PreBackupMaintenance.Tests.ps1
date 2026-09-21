@@ -2,7 +2,7 @@
 param()
 
 BeforeAll {
-    $repositoryRoot = Split-Path -Parent $PSScriptRoot
+    $repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
     $maintenanceScript = Join-Path $repositoryRoot 'PreBackupMaintenance.ps1'
     $coreModule = Join-Path $repositoryRoot 'Maintenance.Core.psm1'
     $maintenanceText = Get-Content -LiteralPath $maintenanceScript -Raw
