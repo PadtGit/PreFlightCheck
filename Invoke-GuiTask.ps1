@@ -7,6 +7,131 @@
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$RequestPath)
+
+function Get-GuiResultPresentation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$ExitCode,
+        [bool]$RestartRequired = $false,
+        [bool]$RepairRecommended = $false,
+        [ValidateRange(0, [int]::MaxValue)][int]$ReviewFindingCount = 0
+    )
+
+    if ($RestartRequired) {
+        return [pscustomobject]@{
+            State = 'Restart'
+            StatusLabel = 'RESTART — Required before cleanup or backup'
+            NextAction = 'Restart Windows, then begin a new guided run.'
+        }
+    }
+    if ($RepairRecommended) {
+        return [pscustomobject]@{
+            State = 'Repair'
+            StatusLabel = 'REPAIR — Windows repair recommended'
+            NextAction = 'Open the health report and run Repair Windows before cleanup.'
+        }
+    }
+    if ($ExitCode -eq 0) {
+        return [pscustomobject]@{
+            State = 'Success'
+            StatusLabel = 'SUCCESS — Task completed'
+            NextAction = 'Review the saved result before continuing.'
+        }
+    }
+    if ($ExitCode -eq 2) {
+        $findingLabel = if ($ReviewFindingCount -eq 1) { '1 finding needs attention' } elseif ($ReviewFindingCount -gt 1) { "$ReviewFindingCount findings need attention" } else { 'Open the saved report' }
+        return [pscustomobject]@{
+            State = 'Review'
+            StatusLabel = "REVIEW — $findingLabel"
+            NextAction = 'Review the listed findings and saved reports before continuing.'
+        }
+    }
+
+    return [pscustomobject]@{
+        State = 'ActionNeeded'
+        StatusLabel = "ACTION NEEDED — Task stopped (exit code $ExitCode)"
+        NextAction = 'Open the saved result and detailed console output before retrying.'
+    }
+}
+
+function Format-GuiTaskSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][psobject]$Presentation,
+        [Parameter(Mandatory)][string]$Task,
+        [Parameter(Mandatory)][datetime]$Finished,
+        [object[]]$ReviewFindings = @(),
+        [Parameter(Mandatory)][string]$RunDirectory,
+        [Parameter(Mandatory)][string]$ConsolePath
+    )
+
+    $summaryLines = [System.Collections.Generic.List[string]]::new()
+    $summaryLines.Add([string]$Presentation.StatusLabel)
+    $summaryLines.Add("Task: $Task")
+    $summaryLines.Add("Finished: $($Finished.ToString('yyyy-MM-dd HH:mm:ss'))")
+    $summaryLines.Add("Next: $($Presentation.NextAction)")
+    if ($ReviewFindings.Count -gt 0) {
+        $summaryLines.Add('Findings:')
+        foreach ($finding in $ReviewFindings) {
+            $summaryLines.Add("- $($finding.Step) / $($finding.Check): $($finding.Detail)")
+            $summaryLines.Add("  Report: $($finding.Report)")
+        }
+    }
+    $summaryLines.Add("Detailed output: $ConsolePath")
+    $summaryLines.Add("Results: $RunDirectory")
+    return $summaryLines -join [Environment]::NewLine
+}
+
+function Receive-ProcessOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][string]$ConsolePath
+    )
+
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    [IO.File]::WriteAllText([IO.Path]::GetFullPath($ConsolePath), '', $utf8)
+    $outputBuilder = [Text.StringBuilder]::new()
+    $errorBuilder = [Text.StringBuilder]::new()
+    $outputComplete = $false
+    $errorComplete = $false
+    $outputTask = $Process.StandardOutput.ReadLineAsync()
+    $errorTask = $Process.StandardError.ReadLineAsync()
+
+    while (-not ($outputComplete -and $errorComplete)) {
+        $receivedLine = $false
+        if (-not $outputComplete -and $outputTask.IsCompleted) {
+            $line = $outputTask.GetAwaiter().GetResult()
+            if ($null -eq $line) {
+                $outputComplete = $true
+            } else {
+                [IO.File]::AppendAllText($ConsolePath, $line + [Environment]::NewLine, $utf8)
+                [void]$outputBuilder.AppendLine($line)
+                $outputTask = $Process.StandardOutput.ReadLineAsync()
+            }
+            $receivedLine = $true
+        }
+        if (-not $errorComplete -and $errorTask.IsCompleted) {
+            $line = $errorTask.GetAwaiter().GetResult()
+            if ($null -eq $line) {
+                $errorComplete = $true
+            } else {
+                [IO.File]::AppendAllText($ConsolePath, $line + [Environment]::NewLine, $utf8)
+                [void]$errorBuilder.AppendLine($line)
+                $errorTask = $Process.StandardError.ReadLineAsync()
+            }
+            $receivedLine = $true
+        }
+        if (-not $receivedLine) { Start-Sleep -Milliseconds 40 }
+    }
+
+    $Process.WaitForExit()
+    return [pscustomobject]@{
+        Output = $outputBuilder.ToString().TrimEnd()
+        Errors = $errorBuilder.ToString().TrimEnd()
+    }
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $requestFile = Get-Item -LiteralPath $RequestPath -ErrorAction Stop
@@ -71,18 +196,14 @@ foreach ($argument in $arguments) { [void]$start.ArgumentList.Add([string]$argum
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $start
 [void]$process.Start()
-$outputTask = $process.StandardOutput.ReadToEndAsync()
-$errorTask = $process.StandardError.ReadToEndAsync()
-$process.WaitForExit()
-$output = $outputTask.Result
-$errors = $errorTask.Result
 $consolePath = Join-Path -Path $runDirectory -ChildPath 'console.txt'
-($output + $errors).Trim() | Set-Content -LiteralPath $consolePath -Encoding utf8
+[void](Receive-ProcessOutput -Process $process -ConsolePath $consolePath)
 $exitCode = $process.ExitCode
 $process.Dispose()
 $restartRequired = $false
 $repairRecommended = $false
 $healthReady = $false
+$reviewFindings = @()
 $machineReport = Get-ChildItem -LiteralPath $runDirectory -Filter report.json -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($machineReport) {
     $machineResult = Get-Content -LiteralPath $machineReport.FullName -Raw | ConvertFrom-Json
@@ -96,20 +217,15 @@ if (Test-Path -LiteralPath $guidedResultPath) {
     $restartRequired = [bool]$guidedResult.RestartRequired
     $repairRecommended = [bool]$guidedResult.RepairRecommended
     $healthReady = [bool]$guidedResult.HealthReady
+    $reviewFindings = @($guidedResult.ReviewFindings)
 }
-$headline = switch ($exitCode) {
-    0 { 'OK - task completed' }
-    2 { 'REVIEW - open the saved report' }
-    default { "NEEDS ATTENTION - exit code $exitCode" }
-}
-if ($restartRequired) { $headline = 'RESTART REQUIRED - stop before cleanup or backup' }
-elseif ($repairRecommended) { $headline = 'WINDOWS REPAIR RECOMMENDED - stop before cleanup' }
-$summary = @($headline, "Task: $($request.Task)", "Finished: $([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))", '', ($output + $errors).Trim()) -join [Environment]::NewLine
+$finishedAt = [datetime]::Now
+$presentation = Get-GuiResultPresentation -ExitCode $exitCode -RestartRequired $restartRequired -RepairRecommended $repairRecommended -ReviewFindingCount $reviewFindings.Count
+$summary = Format-GuiTaskSummary -Presentation $presentation -Task $request.Task -Finished $finishedAt -ReviewFindings $reviewFindings -RunDirectory $runDirectory -ConsolePath $consolePath
 $summary | Set-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'summary.txt') -Encoding utf8
-$finished = [ordered]@{ ExitCode = $exitCode; Task = $request.Task; Finished = [datetime]::Now.ToString('o'); RestartRequired = $restartRequired; RepairRecommended = $repairRecommended; HealthReady = $healthReady; Results = $runDirectory }
-$finished | ConvertTo-Json | Set-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'finished.json') -Encoding utf8
+$finished = [ordered]@{ ExitCode = $exitCode; Task = $request.Task; Finished = $finishedAt.ToString('o'); DisplayState = $presentation.State; StatusLabel = $presentation.StatusLabel; RestartRequired = $restartRequired; RepairRecommended = $repairRecommended; HealthReady = $healthReady; ReviewRequired = ($exitCode -eq 2 -or $reviewFindings.Count -gt 0); ReviewFindings = $reviewFindings; Console = $consolePath; Results = $runDirectory }
+$finished | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'finished.json') -Encoding utf8
 $sessionDirectory = $requestFile.Directory.Parent.FullName
 $sessionLog = Join-Path -Path $sessionDirectory -ChildPath 'session.log'
 @('', ('=' * 72), "Task: $($request.Task)", "Finished: $($finished.Finished)", "Exit code: $exitCode", "Restart required: $restartRequired", "Repair recommended: $repairRecommended", "Results: $runDirectory", '', $summary) | Add-Content -LiteralPath $sessionLog -Encoding UTF8
 exit $exitCode
-

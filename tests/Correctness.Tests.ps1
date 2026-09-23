@@ -8,9 +8,16 @@ BeforeAll {
     $maintenanceAst = [System.Management.Automation.Language.Parser]::ParseFile($maintenancePath, [ref]$null, [ref]$null)
     $dashboardAst = [System.Management.Automation.Language.Parser]::ParseFile($dashboardPath, [ref]$null, [ref]$null)
     $script:taskStatus = 'Ready'
-    foreach ($functionName in @('Update-CleanupAvailability', 'Show-DashboardWarning')) {
+    foreach ($functionName in @('Get-DashboardStateStyle', 'Update-CleanupAvailability', 'Show-DashboardWarning')) {
         $node = $dashboardAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $ast.Name -eq $functionName }, $true)
         if ($node) { . ([scriptblock]::Create($node.Extent.Text)) }
+    }
+    function Set-DashboardStatus {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Test adapter updates only a fixture control and performs no system state changes.')]
+        [CmdletBinding()]
+        param([string]$State, [string]$Label)
+        if ($Label) { $Status.Text = $Label; return }
+        $Status.Text = (Get-DashboardStateStyle -State $State).Label
     }
     # Execute the actual orchestration branches without the inventory/bootstrap or native tools.
     # AST selection is a test seam, not a source-text assertion.
@@ -224,7 +231,7 @@ Describe 'Dashboard health eligibility from completed tasks' {
         $Console = [pscustomobject]@{ Text = '' }
         $Console | Add-Member -MemberType ScriptMethod -Name ScrollToHome -Value { }
         $Status = [pscustomobject]@{ Text = '' }
-        foreach ($name in @('Tasks','Options','Preview','Apply')) { Set-Variable -Name $name -Value ([pscustomobject]@{ IsEnabled = $false }) }
+        foreach ($name in @('Tasks','Options','Preview','Apply','OpenResults','OpenResultFolder')) { Set-Variable -Name $name -Value ([pscustomobject]@{ IsEnabled = $false }) }
         Set-Content (Join-Path $runDirectory 'summary.txt') 'Fixture summary'
     }
 
@@ -268,7 +275,7 @@ Describe 'Cleanup action availability' {
         $script:active = $null
         $script:healthReady = $false
         $script:taskStatus = 'Ready'
-        foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status')) {
+        foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status','OpenResults','OpenResultFolder')) {
             Set-Variable -Name $name -Value ([pscustomobject]@{ Visibility = ''; Text = ''; Content = ''; IsChecked = $false; IsEnabled = $true })
         }
         $Status.Text = 'Ready'
@@ -308,15 +315,16 @@ Describe 'Cleanup action availability' {
     }
 
     It 'relocks cleanup while preserving the <Warning> warning after task completion' -ForEach @(
-        @{ Warning = 'RESTART REQUIRED'; Restart = $true; Repair = $false }
-        @{ Warning = 'WINDOWS REPAIR RECOMMENDED'; Restart = $false; Repair = $true }
+        @{ Warning = 'RESTART — Required before cleanup or backup'; Restart = $true; Repair = $false; Code = 0 }
+        @{ Warning = 'REPAIR — Windows repair recommended'; Restart = $false; Repair = $true; Code = 0 }
+        @{ Warning = 'ACTION NEEDED — Open the saved result'; Restart = $false; Repair = $false; Code = 1 }
     ) {
         Mock Show-DashboardWarning { }
         $script:healthReady = $true
         Show-Page -Page Cleanup
         $script:active = [pscustomobject]@{ HasExited = $true }
         $script:active | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
-        @{ Task = 'HealthCheck'; ExitCode = 0; HealthReady = $true; RestartRequired = $Restart; RepairRecommended = $Repair } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
+        @{ Task = 'HealthCheck'; ExitCode = $Code; HealthReady = $true; RestartRequired = $Restart; RepairRecommended = $Repair } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
         & $completionHandler
         $script:active | Should -BeNullOrEmpty
         $Apply.IsEnabled | Should -BeFalse

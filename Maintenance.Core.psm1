@@ -60,6 +60,80 @@ namespace PreBackup {
     [pscustomobject]@{ OnAC = $status.ACLineStatus -eq 1; Known = $status.ACLineStatus -ne 255; BatteryPercent = $status.BatteryLifePercent }
 }
 
+function Get-ReportReviewFinding {
+    <#
+    .SYNOPSIS
+    Returns the review findings from one maintenance step with their source report.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$StepName,
+        [Parameter(Mandatory)][object]$Report,
+        [Parameter(Mandatory)][string]$ReportPath,
+        [int]$ExitCode = 0
+    )
+    $findings = @($Report.Results | Where-Object { $_.Status -eq 'Review' })
+    foreach ($finding in $findings) {
+        [pscustomobject]@{
+            Step = $StepName
+            Check = [string]$finding.Step
+            Detail = [string]$finding.Detail
+            Report = $ReportPath
+        }
+    }
+    if ($ExitCode -eq 2 -and $findings.Count -eq 0) {
+        [pscustomobject]@{
+            Step = $StepName
+            Check = 'Report'
+            Detail = 'Review the saved report; the step requested review without a detailed finding.'
+            Report = $ReportPath
+        }
+    }
+}
+
+function Get-GuidedRunDisposition {
+    <#
+    .SYNOPSIS
+    Classifies a guided run as stopped, completed with review, or completed clean.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][bool]$Completed,
+        [object[]]$ReviewFindings = @(),
+        [string]$Failure
+    )
+    $reviewRequired = $ReviewFindings.Count -gt 0
+    if (-not $Completed) {
+        return [pscustomobject]@{ ExitCode = 1; ReviewRequired = $reviewRequired; Message = $Failure }
+    }
+    if ($reviewRequired) {
+        return [pscustomobject]@{ ExitCode = 2; ReviewRequired = $true; Message = "Guided pre-backup run completed with $($ReviewFindings.Count) review finding(s)." }
+    }
+    [pscustomobject]@{ ExitCode = 0; ReviewRequired = $false; Message = 'Guided pre-backup run completed.' }
+}
+
+function Get-ReportFailureMessage {
+    <#
+    .SYNOPSIS
+    Describes a failed maintenance step and points to its source report.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$StepName,
+        [Parameter(Mandatory)][object]$Report,
+        [Parameter(Mandatory)][string]$ReportPath,
+        [Parameter(Mandatory)][int]$ExitCode
+    )
+    $failures = @($Report.Results | Where-Object { $_.Status -eq 'Failed' })
+    $details = if ($failures.Count -gt 0) {
+        (@($failures | ForEach-Object { "$($_.Step): $($_.Detail)" }) -join '; ')
+    } else {
+        "Step returned exit code $ExitCode."
+    }
+    "$StepName failed. $details Report: $ReportPath"
+}
+
 function Test-ContainedRegularPath {
     <#
     .SYNOPSIS
@@ -189,6 +263,4 @@ function Remove-AgedTemporaryFile {
     [pscustomobject]@{ Root = $Root; Deleted = $deleted; Skipped = $skipped; Failed = $failed; LogicalBytesDeleted = $bytes }
 }
 
-Export-ModuleMember -Function Get-PendingRestartState, Get-AcPowerState, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile
-
-
+Export-ModuleMember -Function Get-PendingRestartState, Get-AcPowerState, Get-ReportReviewFinding, Get-GuidedRunDisposition, Get-ReportFailureMessage, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile

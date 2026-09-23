@@ -14,11 +14,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $maintenanceScript = Join-Path -Path $PSScriptRoot -ChildPath 'PreBackupMaintenance.ps1'
+$coreModule = Join-Path -Path $PSScriptRoot -ChildPath 'Maintenance.Core.psm1'
+Import-Module -Name $coreModule -Force -ErrorAction Stop
 $windowsPowerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
 [void][IO.Directory]::CreateDirectory($ReportDirectory)
 $combinedLog = Join-Path -Path $ReportDirectory -ChildPath 'guided-run.log'
 $resultPath = Join-Path -Path $ReportDirectory -ChildPath 'guided-result.json'
+$activityPath = Join-Path -Path $ReportDirectory -ChildPath 'current-step.txt'
 $steps = [System.Collections.Generic.List[object]]::new()
+$reviewFindings = [System.Collections.Generic.List[object]]::new()
 $restartRequired = $false
 $repairRecommended = $false
 $healthReady = $false
@@ -26,7 +30,10 @@ $failure = $null
 
 function Write-RunLog {
     param([string]$Message)
-    ('[{0}] {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Message) | Add-Content -LiteralPath $combinedLog -Encoding UTF8
+    $entry = '[{0}] {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Message
+    $entry | Add-Content -LiteralPath $combinedLog -Encoding UTF8
+    if ($Message -match '^(START|END|STOP)\b') { $Message | Set-Content -LiteralPath $activityPath -Encoding UTF8 }
+    Write-Information -MessageData $entry -InformationAction Continue
 }
 
 function Invoke-RunStep {
@@ -37,15 +44,32 @@ function Invoke-RunStep {
     $stepRoot = Join-Path -Path $ReportDirectory -ChildPath $Name
     [void][IO.Directory]::CreateDirectory($stepRoot)
     Write-RunLog "START $Name"
-    $output = & $windowsPowerShell -NoLogo -NoProfile -File $maintenanceScript @Arguments -ReportDirectory $stepRoot 2>&1 | Out-String
+    $outputLines = @(& $windowsPowerShell -NoLogo -NoProfile -File $maintenanceScript @Arguments -ReportDirectory $stepRoot 2>&1 | ForEach-Object {
+        $line = [string]$_
+        Write-Information -MessageData $line -InformationAction Continue
+        $line
+    })
     $exitCode = $LASTEXITCODE
+    $output = $outputLines -join [Environment]::NewLine
     $output.Trim() | Set-Content -LiteralPath (Join-Path -Path $ReportDirectory -ChildPath "$Name-console.txt") -Encoding UTF8
     $reportFile = Get-ChildItem -LiteralPath $stepRoot -Filter report.json -File -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $reportFile) { throw "$Name did not create report.json." }
     $stepReport = Get-Content -LiteralPath $reportFile.FullName -Raw | ConvertFrom-Json
+    foreach ($finding in @(Get-ReportReviewFinding -StepName $Name -Report $stepReport -ReportPath $reportFile.FullName -ExitCode $exitCode)) {
+        $reviewFindings.Add($finding)
+    }
+    if ($stepReport.RestartRequired -or ($stepReport.Restart -and ($stepReport.Restart.Pending -or @($stepReport.Restart.Unknown).Count -gt 0))) {
+        $script:restartRequired = $true
+    }
+    if ($Name -eq '02-WindowsHealth') {
+        $script:repairRecommended = [bool]$stepReport.RepairRecommended
+        $script:healthReady = [bool]$stepReport.HealthReady
+    }
     $steps.Add([pscustomobject]@{ Step = $Name; ExitCode = $exitCode; Report = $reportFile.Directory.FullName })
     Write-RunLog "END $Name exit=$exitCode report=$($reportFile.Directory.FullName)"
-    if ($exitCode -eq 1) { throw "$Name failed. Open its report before continuing." }
+    if ($exitCode -notin @(0,2)) {
+        throw (Get-ReportFailureMessage -StepName $Name -Report $stepReport -ReportPath $reportFile.FullName -ExitCode $exitCode)
+    }
     return $stepReport
 }
 
@@ -62,7 +86,7 @@ try {
     }
 
     $health = Invoke-RunStep -Name '02-WindowsHealth' -Arguments @('-Mode','Health','-MaintenanceWindowConfirmed')
-    $restartRequired = [bool]$health.RestartRequired
+    $restartRequired = $restartRequired -or [bool]$health.RestartRequired
     $repairRecommended = [bool]$health.RepairRecommended
     $healthReady = [bool]$health.HealthReady
     if ($restartRequired) { throw 'RESTART REQUIRED: restart Windows before cleanup or backup.' }
@@ -82,23 +106,30 @@ try {
         $restartRequired = $true
         throw 'RESTART REQUIRED: restart Windows before starting the backup.'
     }
-    Write-RunLog 'Guided run completed. Review the combined summary before starting the backup.'
+    Write-RunLog "Guided run completed with $($reviewFindings.Count) review finding(s). Review the combined summary before starting the backup."
 } catch {
     Write-RunLog "STOP $($_.Exception.Message)"
     $failure = $_.Exception.Message
 } finally {
+    $disposition = Get-GuidedRunDisposition -Completed ([string]::IsNullOrEmpty($failure)) -ReviewFindings @($reviewFindings.ToArray()) -Failure $failure
     $result = [pscustomobject]@{
         Finished = (Get-Date).ToString('o')
         Completed = [string]::IsNullOrEmpty($failure)
         RestartRequired = $restartRequired
         RepairRecommended = $repairRecommended
-        HealthReady = $healthReady
-        Message = if ([string]::IsNullOrEmpty($failure)) { 'Guided pre-backup run completed.' } else { $failure }
+        HealthReady = $healthReady -and $disposition.ExitCode -ne 1
+        ReviewRequired = $disposition.ReviewRequired
+        ReviewFindings = @($reviewFindings.ToArray())
+        Message = $disposition.Message
         Steps = $steps
     }
     $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $resultPath -Encoding UTF8
     $result.Steps | Export-Csv -LiteralPath (Join-Path -Path $ReportDirectory -ChildPath 'guided-steps.csv') -NoTypeInformation -Encoding UTF8
 }
-if (-not $result.Completed) { Write-Error -Message $result.Message -ErrorAction Continue; exit 1 }
+if ($disposition.ExitCode -eq 1) { Write-Error -Message $result.Message -ErrorAction Continue; exit 1 }
+if ($disposition.ExitCode -eq 2) {
+    Write-Output "REVIEW - guided run completed with $($reviewFindings.Count) finding(s). Review guided-result.json and the saved step reports before starting the backup."
+    exit 2
+}
 Write-Output 'OK - guided pre-backup run completed. Review guided-run.log and all step reports before starting the backup.'
 exit 0

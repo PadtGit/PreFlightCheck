@@ -6,13 +6,48 @@
     Renders the dashboard to a PNG without running maintenance.
 .PARAMETER UiPage
     Page to render during UI testing.
+.PARAMETER UiState
+    Dashboard state to render during UI testing.
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseBOMForUnicodeEncodedFile','',Justification='PowerShell 7 reads this UTF-8 interface file without a BOM.')]
 param(
     [string]$UiTestOutput,
-    [ValidateSet('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')][string]$UiPage = 'Runbook'
+    [ValidateSet('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')][string]$UiPage = 'Runbook',
+    [ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair')][string]$UiState = 'Idle'
 )
+
+function Get-DashboardStateStyle {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair')][string]$State)
+
+    switch ($State) {
+        'Idle' { return [pscustomobject]@{ Label = 'IDLE — Ready'; Foreground = '#ADC0D2'; Background = '#172534'; Border = '#4A6178' } }
+        'Running' { return [pscustomobject]@{ Label = 'RUNNING — Maintenance in progress'; Foreground = '#8BD5FF'; Background = '#102B3A'; Border = '#2D93C4' } }
+        'Success' { return [pscustomobject]@{ Label = 'SUCCESS — Task completed'; Foreground = '#7BE0B5'; Background = '#12352F'; Border = '#2A9D78' } }
+        'Review' { return [pscustomobject]@{ Label = 'REVIEW — Open the saved report'; Foreground = '#F3C87F'; Background = '#3A2D16'; Border = '#C99339' } }
+        'ActionNeeded' { return [pscustomobject]@{ Label = 'ACTION NEEDED — Open the saved result'; Foreground = '#F2A093'; Background = '#3B201E'; Border = '#C85A4A' } }
+        'Restart' { return [pscustomobject]@{ Label = 'RESTART — Required before cleanup or backup'; Foreground = '#FFD08A'; Background = '#3B2917'; Border = '#D98A32' } }
+        'Repair' { return [pscustomobject]@{ Label = 'REPAIR — Windows repair recommended'; Foreground = '#FFAD8A'; Background = '#3B241C'; Border = '#D66D45' } }
+    }
+}
+
+function Get-LiveActivityText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Task,
+        [Parameter(Mandatory)][string]$ConsolePath,
+        [string]$ActivityPath,
+        [ValidateRange(1, 100)][int]$MaximumLines = 14
+    )
+
+    $activityLines = @()
+    if (Test-Path -LiteralPath $ConsolePath) { $activityLines = @(Get-Content -LiteralPath $ConsolePath -Tail $MaximumLines -ErrorAction Stop) }
+    if ($activityLines.Count -eq 0) { $activityLines = @('Waiting for worker output…') }
+    $currentActivity = if ($ActivityPath -and (Test-Path -LiteralPath $ActivityPath)) { (Get-Content -LiteralPath $ActivityPath -Raw -ErrorAction Stop).Trim() } else { $Task }
+    return (@("RUNNING — $Task", "Current step: $currentActivity", "Live activity (latest $MaximumLines lines)", "Detailed output: $ConsolePath", '') + $activityLines) -join [Environment]::NewLine
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows -or -not [Environment]::Is64BitProcess) { throw '64-bit PowerShell 7 on Windows is required.' }
@@ -21,7 +56,7 @@ $startupPrincipal = [Security.Principal.WindowsPrincipal]::new([Security.Princip
 if (-not $UiTestOutput -and -not $startupPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     $elevated = [Diagnostics.ProcessStartInfo]::new((Join-Path -Path $PSHOME -ChildPath 'pwsh.exe'))
     $elevated.UseShellExecute = $true; $elevated.Verb = 'runas'; $elevated.WindowStyle = 'Hidden'
-    foreach ($argument in @('-NoLogo','-NoProfile','-STA','-File',$PSCommandPath,'-UiPage',$UiPage)) { [void]$elevated.ArgumentList.Add($argument) }
+    foreach ($argument in @('-NoLogo','-NoProfile','-STA','-File',$PSCommandPath,'-UiPage',$UiPage,'-UiState',$UiState)) { [void]$elevated.ArgumentList.Add($argument) }
     [void][Diagnostics.Process]::Start($elevated)
     exit 0
 }
@@ -33,19 +68,20 @@ $script:runDirectory = $null
 $script:sessionDirectory = $null
 $script:taskNumber = 0
 $script:healthReady = $false
-$script:taskStatus = 'Ready'
+$script:taskStatus = 'IDLE — Ready'
 $script:lastPage = 'Runbook'
+$script:activeTask = $null
 [xml]$layout = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="780" MinWidth="940" MinHeight="650" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
 <Window.Resources>
-<Style TargetType="Button"><Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="0,0,8,6"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
+<Style TargetType="Button"><Setter Property="Padding" Value="10,5"/><Setter Property="Margin" Value="0,0,8,4"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
 <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
 <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E9F1F7"/><Setter Property="Margin" Value="0,5,0,8"/></Style>
 </Window.Resources>
-<Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="220"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="260"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock Text="PRE-BACKUP MAINTENANCE" FontSize="26" FontWeight="Bold"/><TextBlock x:Name="Session" Foreground="#ADC0D2" Margin="0,6,0,16"/></StackPanel>
 <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,5"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="SystemRepairButton" Content="System Corruption Scan - Run"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,7,0,5"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel>
+<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,6,0"><StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,3"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="SystemRepairButton" Content="System Corruption Scan - Run"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel></ScrollViewer>
 <Grid Grid.Column="1" Margin="20,0,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock x:Name="Heading" FontSize="22" FontWeight="Bold"/><TextBlock x:Name="Description" Margin="0,8,0,5"/><TextBlock x:Name="Access" Foreground="#F3C87F" Margin="0,0,0,12"/></StackPanel>
 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Options">
@@ -57,15 +93,30 @@ $script:lastPage = 'Runbook'
 </StackPanel></ScrollViewer>
 <WrapPanel Grid.Row="2"><Button x:Name="Preview" Content="Run review" Background="#14756C"/><Button x:Name="Apply" Content="Apply changes…" Background="#964B38"/></WrapPanel>
 </Grid></Grid>
-<Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="RESULT" Foreground="#74DCC7" FontWeight="Bold" Margin="0,0,0,6"/><TextBox x:Name="Console" Grid.Row="1" IsReadOnly="True" Background="#080D14" Foreground="#BFE9D9" FontFamily="Consolas" FontSize="13" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Choose a task. Results will appear here."/></Grid>
-<DockPanel Grid.Row="3" Margin="0,12,0,0"><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button x:Name="OpenResults" Content="Open results"/><Button x:Name="OpenGuide" Content="Guide"/></StackPanel><TextBlock x:Name="Status" Text="Ready" VerticalAlignment="Center"/></DockPanel>
+<Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="LIVE ACTIVITY / RESULT" Foreground="#74DCC7" FontWeight="Bold" VerticalAlignment="Center"/><Border x:Name="StatusBorder" Grid.Column="1" HorizontalAlignment="Right" Background="#172534" BorderBrush="#4A6178" BorderThickness="1" CornerRadius="3" Padding="9,4"><TextBlock x:Name="Status" Text="IDLE — Ready" Foreground="#ADC0D2" FontWeight="SemiBold"/></Border></Grid><TextBox x:Name="Console" Grid.Row="1" IsReadOnly="True" Background="#080D14" Foreground="#D7E7E1" FontFamily="Consolas" FontSize="13" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Choose a task. Live activity and the final result will appear here."/></Grid>
+<DockPanel Grid.Row="3" Margin="0,12,0,0"><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button x:Name="OpenResults" Content="Open result summary" IsEnabled="False"/><Button x:Name="OpenResultFolder" Content="Open result folder" IsEnabled="False"/><Button x:Name="OpenGuide" Content="Guide"/></StackPanel><TextBlock Text="Detailed output is saved automatically." Foreground="#ADC0D2" VerticalAlignment="Center"/></DockPanel>
 </Grid></Window>
 '@
 $script:window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
-foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenGuide','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
+foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenResultFolder','OpenGuide','StatusBorder','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
+function Set-DashboardStatus {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Updates only dashboard presentation controls and performs no system state changes.')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair')][string]$State,
+        [string]$Label
+    )
+
+    $style = Get-DashboardStateStyle -State $State
+    $Status.Text = if ([string]::IsNullOrWhiteSpace($Label)) { $style.Label } else { $Label }
+    $Status.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Foreground)
+    $StatusBorder.Background = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Background)
+    $StatusBorder.BorderBrush = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Border)
+}
+Set-DashboardStatus -State Idle
 function Update-CleanupAvailability {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Updates only dashboard controls; maintenance retains its confirmation and execution guards.')]
     [CmdletBinding()]
@@ -82,7 +133,7 @@ function Update-CleanupAvailability {
         $Apply.Content = 'Cleanup locked'
         $Access.Text = 'CLEANUP LOCKED: Run normal Windows health checks successfully before applying cleanup. Preview is available.'
         if (-not $taskRunning) {
-            if ($Status.Text -match '^(RESTART REQUIRED|WINDOWS REPAIR RECOMMENDED|NEEDS ATTENTION|REVIEW)') {
+            if ($Status.Text -match '^(RESTART|REPAIR|ACTION NEEDED|WINDOWS REPAIR RECOMMENDED|NEEDS ATTENTION|REVIEW)\b') {
                 $Status.Text = 'CLEANUP LOCKED - ' + $Status.Text
             } else {
                 $Status.Text = 'CLEANUP LOCKED - run Windows health checks first'
@@ -222,15 +273,37 @@ function Start-DashboardTask {
         if ($requiresAdmin -and -not $isAdmin) { $start.Verb = 'runas' }
         foreach ($argument in @('-NoLogo','-NoProfile','-File',$worker,'-RequestPath',$requestPath)) { [void]$start.ArgumentList.Add($argument) }
         $script:active = [Diagnostics.Process]::Start($start)
+        $script:activeTask = [string]$request.Task
         $Tasks.IsEnabled = $false; $Options.IsEnabled = $false; $Preview.IsEnabled = $false; $Apply.IsEnabled = $false
-        $Console.Text = "Running $($request.Task)…`r`nResults: $runDirectory"; $Status.Text = 'Running'
-    } catch { [void][Windows.MessageBox]::Show($window, $_.Exception.Message, 'Unable to start', 'OK', 'Error') }
+        $OpenResults.IsEnabled = $false; $OpenResultFolder.IsEnabled = $false
+        $currentStepPath = Join-Path -Path $runDirectory -ChildPath 'GuidedReport\current-step.txt'
+        $Console.Text = Get-LiveActivityText -Task $script:activeTask -ConsolePath (Join-Path -Path $runDirectory -ChildPath 'console.txt') -ActivityPath $currentStepPath
+        $Console.ScrollToEnd()
+        Set-DashboardStatus -State Running
+        Update-CleanupAvailability
+    } catch {
+        $Console.Text = "Task could not start.`r`n$($_.Exception.Message)"
+        Set-DashboardStatus -State ActionNeeded -Label 'ACTION NEEDED — Task could not start'
+        [void][Windows.MessageBox]::Show($window, $_.Exception.Message, 'Unable to start', 'OK', 'Error')
+    }
 }
 $RunbookButton.Add_Click({ Show-Page Runbook }); $AuditButton.Add_Click({ Show-Page Audit }); $ApplicationsButton.Add_Click({ Show-Page Applications }); $CleanupButton.Add_Click({ Show-Page Cleanup }); $HealthButton.Add_Click({ Show-Page Health }); $SystemRepairButton.Add_Click({ Show-Page SystemRepair }); $DellButton.Add_Click({ Show-Page Dell })
 $Preview.Add_Click({ Start-DashboardTask }); $Apply.Add_Click({ Start-DashboardTask -ApplyChanges })
 $InstallUpgradeButton.Add_Click({ Start-DashboardTask -RequestedAction Install }); $UninstallButton.Add_Click({ Start-DashboardTask -RequestedAction Uninstall }); $UpgradeAllButton.Add_Click({ Start-DashboardTask -RequestedAction UpgradeAll }); $ShowInstalledButton.Add_Click({ Start-DashboardTask -RequestedAction Installed }); $ClearSelectionButton.Add_Click({ $ValueInput.Text = '' })
 $ValueInput.Add_TextChanged({ if ($script:lastPage -eq 'Applications') { $count = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }); $SelectionCount.Text = "Selected Apps: $($count.Count)" } })
-$OpenResults.Add_Click({ if ($script:sessionDirectory) { Start-Process -FilePath explorer.exe -ArgumentList ('"' + $script:sessionDirectory + '"') } else { [void][Windows.MessageBox]::Show('Run a task first.') } })
+$OpenResults.Add_Click({
+    $summaryPath = if ($script:runDirectory) { Join-Path -Path $script:runDirectory -ChildPath 'summary.txt' } else { $null }
+    if ($summaryPath -and (Test-Path -LiteralPath $summaryPath)) { Start-Process -FilePath $summaryPath }
+    elseif ($script:runDirectory -and (Test-Path -LiteralPath $script:runDirectory)) {
+        [void][Windows.MessageBox]::Show('No result summary was saved. Opening the result folder instead.', 'Result summary unavailable', 'OK', 'Warning')
+        Start-Process -FilePath explorer.exe -ArgumentList ('"' + $script:runDirectory + '"')
+    } else { [void][Windows.MessageBox]::Show('Run a task first.') }
+})
+$OpenResultFolder.Add_Click({
+    $resultDirectory = if ($script:runDirectory -and (Test-Path -LiteralPath $script:runDirectory)) { $script:runDirectory } else { $script:sessionDirectory }
+    if ($resultDirectory) { Start-Process -FilePath explorer.exe -ArgumentList ('"' + $resultDirectory + '"') }
+    else { [void][Windows.MessageBox]::Show('Run a task first.') }
+})
 $OpenGuide.Add_Click({ Start-Process -FilePath (Join-Path -Path $root -ChildPath 'README.md') })
 $timer = [Windows.Threading.DispatcherTimer]::new(); $timer.Interval = [timespan]::FromMilliseconds(700)
 $timer.Add_Tick({
@@ -243,8 +316,9 @@ $timer.Add_Tick({
                 if ($completedRequest.Task -in @('HealthCheck','HealthRepair','SystemRepair','PreBackupRun')) { $script:healthReady = $false }
             }
             $summaryPath = Join-Path -Path $runDirectory -ChildPath 'summary.txt'
-            $Console.Text = if (Test-Path -LiteralPath $summaryPath) { Get-Content -LiteralPath $summaryPath -Raw } else { 'NEEDS ATTENTION - no summary was saved.' }
-            $Console.ScrollToHome(); $script:taskStatus = ($Console.Text -split '\r?\n')[0]; $Status.Text = $script:taskStatus
+            $hasSummary = Test-Path -LiteralPath $summaryPath
+            $Console.Text = if ($hasSummary) { Get-Content -LiteralPath $summaryPath -Raw } else { "ACTION NEEDED — No summary was saved.`r`nOpen the result folder for console.txt and report files." }
+            $Console.ScrollToHome()
             $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
             if (Test-Path -LiteralPath $finishedPath) {
                 $finished = Get-Content -LiteralPath $finishedPath -Raw | ConvertFrom-Json
@@ -252,23 +326,35 @@ $timer.Add_Tick({
                 elseif ($finished.Task -in @('HealthCheck','PreBackupRun')) {
                     $script:healthReady = [bool]$finished.HealthReady -and $finished.ExitCode -eq 0
                 }
+                $displayState = if ($finished.PSObject.Properties['DisplayState']) { [string]$finished.DisplayState } elseif ($finished.RestartRequired) { 'Restart' } elseif ($finished.RepairRecommended) { 'Repair' } elseif ($finished.ExitCode -eq 0) { 'Success' } elseif ($finished.ExitCode -eq 2) { 'Review' } else { 'ActionNeeded' }
+                $statusLabel = if ($finished.PSObject.Properties['StatusLabel']) { [string]$finished.StatusLabel } else { $null }
+                if ($hasSummary) { Set-DashboardStatus -State $displayState -Label $statusLabel }
+                else { Set-DashboardStatus -State ActionNeeded -Label 'ACTION NEEDED — Result summary missing' }
+                $script:taskStatus = $Status.Text
                 if ($finished.RestartRequired) {
                     $script:healthReady = $false
-                    $Status.Text = 'RESTART REQUIRED - stop before cleanup or backup'
+                    Set-DashboardStatus -State Restart
                     $script:taskStatus = $Status.Text
                     Show-DashboardWarning -Message 'Restart Windows before running cleanup or starting the Veeam backup. After restarting, open the dashboard and begin a new guided run.' -Title 'Restart required' -Icon Stop
                 } elseif ($finished.RepairRecommended) {
                     $script:healthReady = $false
-                    $Status.Text = 'WINDOWS REPAIR RECOMMENDED - cleanup remains locked'
+                    Set-DashboardStatus -State Repair
                     $script:taskStatus = $Status.Text
                     Show-DashboardWarning -Message 'Windows health checks recommend repair or manual review. Open the saved results and run Repair Windows before cleanup.' -Title 'Repair recommended' -Icon Warning
                 }
-            }
+            } else { Set-DashboardStatus -State ActionNeeded -Label 'ACTION NEEDED — Result metadata missing'; $script:taskStatus = $Status.Text }
             $script:active.Dispose(); $script:active = $null
+            $script:activeTask = $null
             $Tasks.IsEnabled = $true; $Options.IsEnabled = $true; $Preview.IsEnabled = $true
+            $OpenResults.IsEnabled = $true; $OpenResultFolder.IsEnabled = $true
             Update-CleanupAvailability
+        } else {
+            $activityPath = Join-Path -Path $runDirectory -ChildPath 'console.txt'
+            $currentStepPath = Join-Path -Path $runDirectory -ChildPath 'GuidedReport\current-step.txt'
+            $Console.Text = Get-LiveActivityText -Task $script:activeTask -ConsolePath $activityPath -ActivityPath $currentStepPath
+            $Console.ScrollToEnd()
         }
-    } catch { $Status.Text = 'Waiting for result…' }
+    } catch { Set-DashboardStatus -State Running -Label 'RUNNING — Waiting for the next activity update' }
 })
 $window.Add_Closing({ if ($script:active -and -not $script:active.HasExited) { $_.Cancel = $true; [void][Windows.MessageBox]::Show('Wait for the running task to finish before closing.') } })
 $window.Add_ContentRendered({
@@ -285,10 +371,17 @@ if ($UiTestOutput) {
         foreach ($invalid in @('0','6','366','1.5','abc')) { $ValueInput.Text = $invalid; $rejected = $false; try { Get-CleanupAge | Out-Null } catch { $rejected = $true }; if (-not $rejected) { throw "Invalid age accepted: $invalid" } }
         $ValueInput.Text = '14'; if ((Get-CleanupAge) -ne 14) { throw 'Valid cleanup age rejected.' }
     }
+    Set-DashboardStatus -State $UiState
+    if ($UiState -eq 'Running') {
+        $Console.Text = @('RUNNING — PreBackupRun','Current step: START 02-WindowsHealth','Live activity (latest 14 lines)','Detailed output: C:\GuiRuns\fixture\console.txt','','CHKDSK: scanning the file system…','SFC: verification in progress…','DISM: checking the component store…') -join [Environment]::NewLine
+    } elseif ($UiState -ne 'Idle') {
+        $style = Get-DashboardStateStyle -State $UiState
+        $Console.Text = @($style.Label,'Task: PreBackupRun','Finished: 2026-09-23 10:11:12','Next: Review the saved result before continuing.','Detailed output: C:\GuiRuns\fixture\console.txt','Results: C:\GuiRuns\fixture') -join [Environment]::NewLine
+        $OpenResults.IsEnabled = $true; $OpenResultFolder.IsEnabled = $true
+    }
     $surface = $window.Content; $surface.Measure([Windows.Size]::new(1080,740)); $surface.Arrange([Windows.Rect]::new(0,0,1080,740)); $surface.UpdateLayout()
     $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1080,740,96,96,[Windows.Media.PixelFormats]::Pbgra32); $bitmap.Render($surface)
     $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new(); $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
     $stream = [IO.File]::Create([IO.Path]::GetFullPath($UiTestOutput)); try { $encoder.Save($stream) } finally { $stream.Dispose() }
-    Write-Output 'PASS: seven dashboard pages rendered and cleanup input limits were validated. No maintenance ran.'
+    Write-Output "PASS: seven dashboard pages and the $UiState state rendered; cleanup input limits were validated. No maintenance ran."
 } else { $timer.Start(); try { [void]$window.ShowDialog() } finally { $timer.Stop() } }
-
