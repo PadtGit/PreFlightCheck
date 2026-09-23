@@ -2,7 +2,7 @@
 
 **Clean system, smaller backup, faster restore.**
 
-Version: `0.3.1`
+Version: `0.4.0`
 
 Windows 11 pre-backup maintenance toolkit — integrity checks, disk cleanup, and health reports before your Veeam job runs.
 
@@ -23,6 +23,8 @@ The dashboard always requests Administrator permission so System Review can coll
 - Application updates: preview WinGet updates and select exact application IDs.
 - Dell review: attended BIOS and driver review specifically for the **Dell G5 5590**.
 - Guided run: enforces review → health → update preview → cleanup preview → cleanup → final review, and stops before cleanup when repair or restart is required.
+- Guided review summary: carries each step's review findings into the final dashboard result, with the affected check and report location. A completed sequence with findings returns exit code 2.
+- Live dashboard activity: shows the current guided step and recent worker output while preserving complete output in `console.txt`, then provides concise status and result-opening actions.
 
 This initial toolkit was tailored to a Dell G5 5590. Review suitability before using it on another computer; the Dell helper rejects other models.
 
@@ -43,7 +45,7 @@ Run maintenance during a separate quiet window, review the reports, and finish a
 | `Update-Applications.ps1` | Application update helper |
 | `Weekly-DellReview.ps1` | Dell G5 5590 review helper |
 
-Dashboard results are saved under `GuiRuns/<session>/`. The combined `session.log` is at the session root. Each task folder contains `console.txt`, `summary.txt`, and `finished.json`; its maintenance reports and native-tool logs are under `Report/<timestamp>/`. Guided runs keep their step reports under the task's `GuidedReport/` folder. Direct command-line runs default to `Reports/`. Generated reports can contain local paths and system information and are excluded from version control.
+Dashboard results are saved under `GuiRuns/<session>/`. The combined `session.log` is at the session root. Each task folder contains `console.txt`, `summary.txt`, and `finished.json`; its maintenance reports and native-tool logs are under `Report/<timestamp>/`. Guided runs keep their step reports under the task's `GuidedReport/` folder. During a task, the dashboard shows the current guided step and latest activity lines; afterward it shows a concise result with actions for the summary and result folder. Direct command-line runs default to `Reports/`. Generated reports can contain local paths and system information and are excluded from version control.
 
 The **WinGet applications** page includes **Preview available updates**, Install/Upgrade selected IDs, Uninstall selected IDs, Upgrade all applications, Show Installed Apps, and Clear Selection. The available-update and installed-app lists appear in the dashboard result area. Their full output stays in `AvailableAppUpdates.txt` and `InstalledApps.txt` inside the task's `Report/<timestamp>/` folder; the displayed output also feeds the session log. Preview does not install updates.
 

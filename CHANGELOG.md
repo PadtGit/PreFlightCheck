@@ -27,6 +27,15 @@
 - Removed an invalid workflow file and enabled verification for pull requests targeting release branches.
 - Retried transient PSScriptAnalyzer engine failures per file while preserving a hard failure after three unsuccessful attempts.
 
+## 0.4.0 - 2026-09-21
+
+- Carried review findings from every guided-run step into `guided-result.json` and the dashboard summary, including the source report path.
+- Return exit code 2 when the guided sequence completes with findings that need review; keep exit code 1 for a stopped run and 0 for a clean completion.
+- Keep the Windows health cleanup gate separate from the guided review status.
+- Preserve restart and repair flags from a failed health step and name the failed check in the stopped-run summary.
+- Clarify idle, running, success, review, action-needed, restart, and repair dashboard states with readable labels and supplementary color.
+- Stream the current guided step and recent worker output into a modest live activity panel, then show a concise result with direct summary and result-folder actions.
+
 ## 0.2.0 - P0 safety verification
 
 - Added isolated Pester coverage for the pre-backup safety contract.

@@ -155,3 +155,60 @@ Describe 'Release 0.3.0 regression contract' {
     }
 }
 
+Describe 'Guided review findings' {
+    BeforeAll { Import-Module -Name $coreModule -Force }
+    AfterAll { Remove-Module -Name Maintenance.Core -Force -ErrorAction SilentlyContinue }
+
+    It 'keeps every review detail and its step and report location' {
+        $report = [pscustomobject]@{ Results = @(
+            [pscustomobject]@{ Step = 'Storage'; Status = 'Review'; Detail = 'Disk needs attention' },
+            [pscustomobject]@{ Step = 'System'; Status = 'Observed'; Detail = 'Collected' },
+            [pscustomobject]@{ Step = 'Restart'; Status = 'Review'; Detail = 'Restart pending' }
+        ) }
+
+        $findings = @(Get-ReportReviewFinding -StepName '01-SystemReview' -Report $report -ReportPath 'C:\fixture\report.json')
+
+        $findings.Count | Should -Be 2
+        $findings[0].Step | Should -Be '01-SystemReview'
+        $findings[0].Check | Should -Be 'Storage'
+        $findings[0].Detail | Should -Be 'Disk needs attention'
+        $findings[0].Report | Should -Be 'C:\fixture\report.json'
+        $findings[1].Detail | Should -Be 'Restart pending'
+    }
+
+    It 'marks a review exit with no matching findings as needing inspection' {
+        $report = [pscustomobject]@{ Results = @([pscustomobject]@{ Step = 'System'; Status = 'Observed'; Detail = 'Collected' }) }
+
+        $findings = @(Get-ReportReviewFinding -StepName '03-WinGetPreview' -Report $report -ReportPath 'C:\fixture\report.json' -ExitCode 2)
+
+        $findings.Count | Should -Be 1
+        $findings[0].Check | Should -Be 'Report'
+        $findings[0].Detail | Should -Match 'Review the saved report'
+    }
+
+    It 'distinguishes completed with review from completed clean and stopped' {
+        $finding = [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Storage'; Detail = 'Review disk'; Report = 'C:\fixture\report.json' }
+
+        $review = Get-GuidedRunDisposition -Completed $true -ReviewFindings @($finding)
+        $clean = Get-GuidedRunDisposition -Completed $true -ReviewFindings @()
+        $stopped = Get-GuidedRunDisposition -Completed $false -ReviewFindings @($finding) -Failure 'Restart required'
+
+        $review.ExitCode | Should -Be 2
+        $review.ReviewRequired | Should -BeTrue
+        $review.Message | Should -Match '1 review finding'
+        $clean.ExitCode | Should -Be 0
+        $clean.ReviewRequired | Should -BeFalse
+        $stopped.ExitCode | Should -Be 1
+        $stopped.Message | Should -Be 'Restart required'
+    }
+
+    It 'names the failed check and its report for a stopped step' {
+        $report = [pscustomobject]@{ Results = @([pscustomobject]@{ Step = 'DISM-Health'; Status = 'Failed'; Detail = 'Restart required' }) }
+
+        $message = Get-ReportFailureMessage -StepName '02-WindowsHealth' -Report $report -ReportPath 'C:\fixture\report.json' -ExitCode 1
+
+        $message | Should -Match '02-WindowsHealth'
+        $message | Should -Match 'DISM-Health: Restart required'
+        $message | Should -Match 'C:\\fixture\\report.json'
+    }
+}
