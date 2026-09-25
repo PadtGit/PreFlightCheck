@@ -11,6 +11,25 @@ BeforeAll {
 }
 
 Describe 'PreBackupMaintenance safety contract' {
+    It 'rejects upgrade-all without confirmation before creating a report folder' {
+        $reportRoot = Join-Path $TestDrive 'unconfirmed-upgrade-all'
+        $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $output = & $windowsPowerShell -NoLogo -NoProfile -File $maintenanceScript -Mode Updates -UpgradeAll -ReportDirectory $reportRoot 2>&1
+
+        $LASTEXITCODE | Should -Be 1
+        ($output -join "`n") | Should -Match 'Selected application changes require -MaintenanceWindowConfirmed'
+        Test-Path -LiteralPath $reportRoot | Should -BeFalse
+    }
+
+    It 'invokes repair tools directly with discrete arguments' {
+        $repairBlock = [regex]::Match($maintenanceText, '(?s)if \(\$Mode -eq ''SystemRepair''\).*?(?=if \(\$Mode -eq ''Health''\))').Value
+
+        $repairBlock | Should -Match 'System32\\chkdsk\.exe.*@\(''/scan'',''/perf''\)'
+        $repairBlock | Should -Match 'System32\\sfc\.exe.*@\(''/scannow''\)'
+        $repairBlock | Should -Match 'System32\\DISM\.exe.*@\(''/online'',''/cleanup-image'',''/restorehealth''\)'
+        $repairBlock | Should -Not -Match 'System32\\cmd\.exe'
+    }
+
     It 'defaults to Audit and exposes WhatIf through ShouldProcess' {
         $maintenanceText | Should -Match "\$Mode = 'Audit'"
         $maintenanceText | Should -Match '\[CmdletBinding\(SupportsShouldProcess'
@@ -49,9 +68,6 @@ Describe 'PreBackupMaintenance safety contract' {
 
     It 'keeps the existing health scan and adds the WinUtil-style corruption scan commands' {
         $maintenanceText | Should -Match "Mode -eq 'SystemRepair'"
-        $maintenanceText | Should -Match 'chkdsk /scan /perf'
-        $maintenanceText | Should -Match 'sfc /scannow'
-        $maintenanceText | Should -Match 'dism /online /cleanup-image /restorehealth'
         $maintenanceText | Should -Match 'SystemRepair'
     }
 

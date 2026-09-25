@@ -70,7 +70,7 @@ if (($EmptyRecycleBin -or $ClearDeliveryCache) -and $Mode -ne 'Clean') { throw '
 if (($RepairWindows -or $ComponentCleanup) -and $Mode -ne 'Health') { throw 'Repair switches require Health mode.' }
 if (($Uninstall -or $UpgradeAll -or $ShowInstalled) -and $Mode -ne 'Updates') { throw 'Winget action switches require Updates mode.' }
 if (($ApplicationId.Count -gt 0 -or $OpenUpdatePages) -and $Mode -ne 'Updates') { throw 'Update switches require Updates mode.' }
-if (($Uninstall -or $ApplicationId.Count -gt 0) -and $Mode -eq 'Updates' -and -not $MaintenanceWindowConfirmed -and -not $WhatIfPreference) { throw 'Selected application changes require -MaintenanceWindowConfirmed.' }
+if (($Uninstall -or $ApplicationId.Count -gt 0 -or $UpgradeAll) -and $Mode -eq 'Updates' -and -not $MaintenanceWindowConfirmed -and -not $WhatIfPreference) { throw 'Selected application changes require -MaintenanceWindowConfirmed.' }
 if ($Uninstall -and $ApplicationId.Count -eq 0) { throw 'Uninstall requires at least one exact application ID.' }
 foreach ($id in $ApplicationId) {
     if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]*$') { throw "Invalid exact application ID: $id" }
@@ -224,12 +224,12 @@ try {
     if ($Mode -eq 'SystemRepair') {
         $report.HealthReady = $false
         if ($PSCmdlet.ShouldProcess('Windows system', 'Run WinUtil-style system corruption scan and repair')) {
-            $diskCode = Invoke-LoggedProgram -Name SystemRepair-CHKDSK -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','chkdsk /scan /perf') -AcceptedCodes @(0,1,2)
+            $diskCode = Invoke-LoggedProgram -Name SystemRepair-CHKDSK -FilePath "$env:SystemRoot\System32\chkdsk.exe" -Arguments @('/scan','/perf') -AcceptedCodes @(0,1,2)
             if ($diskCode -in @(1,2)) {
                 Add-Result -Step SystemRepair-CHKDSK -Status Review -Detail "CHKDSK returned $diskCode. Review the saved disk log before further maintenance."
             }
-            [void](Invoke-LoggedProgram -Name SystemRepair-SFC -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','sfc /scannow'))
-            $repairCode = Invoke-LoggedProgram -Name SystemRepair-DISM -FilePath "$env:SystemRoot\System32\cmd.exe" -Arguments @('/c','dism /online /cleanup-image /restorehealth') -AcceptedCodes @(0,3010)
+            [void](Invoke-LoggedProgram -Name SystemRepair-SFC -FilePath "$env:SystemRoot\System32\sfc.exe" -Arguments @('/scannow'))
+            $repairCode = Invoke-LoggedProgram -Name SystemRepair-DISM -FilePath "$env:SystemRoot\System32\DISM.exe" -Arguments @('/online','/cleanup-image','/restorehealth') -AcceptedCodes @(0,3010)
             if ($repairCode -eq 3010) {
                 $report.RestartRequired = $true
                 Add-Result -Step SystemRepair -Status Review -Detail 'RESTART REQUIRED: DISM repaired the image and requested a restart.'

@@ -2,4 +2,5 @@
 GuiRuns/
 Reports/
 ValidationReport/
+dist/
 *.log
