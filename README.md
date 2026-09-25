@@ -2,7 +2,7 @@
 
 **Clean system, smaller backup, faster restore.**
 
-Version: `0.4.0`
+Version: `0.4.1`
 
 Windows 11 pre-backup maintenance toolkit — integrity checks, disk cleanup, and health reports before your Veeam job runs.
 
@@ -24,7 +24,7 @@ The dashboard always requests Administrator permission so System Review can coll
 - Dell review: attended BIOS and driver review specifically for the **Dell G5 5590**.
 - Guided run: enforces review → health → update preview → cleanup preview → cleanup → final review, and stops before cleanup when repair or restart is required.
 - Guided review summary: carries each step's review findings into the final dashboard result, with the affected check and report location. A completed sequence with findings returns exit code 2.
-- Live dashboard activity: shows the current guided step and recent worker output while preserving complete output in `console.txt`, then provides concise status and result-opening actions.
+- Live dashboard activity across all checks: shows the current operation, elapsed time, and recent worker output. Native tools such as DISM, SFC, CHKDSK, VSS, and WinGet stream their output during execution. A tool-provided percentage appears when available; other checks show an activity indicator. Complete output stays in `console.txt` and native-tool logs, with concise status and result-opening actions after completion.
 
 This initial toolkit was tailored to a Dell G5 5590. Review suitability before using it on another computer; the Dell helper rejects other models.
 

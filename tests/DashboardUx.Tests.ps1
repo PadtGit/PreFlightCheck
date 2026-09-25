@@ -28,12 +28,13 @@ BeforeAll {
     Import-ScriptFunction -Path $workerPath -Name 'Format-GuiTaskSummary'
     Import-ScriptFunction -Path $workerPath -Name 'Receive-ProcessOutput'
     Import-ScriptFunction -Path $dashboardPath -Name 'Get-DashboardStateStyle'
+    Import-ScriptFunction -Path $dashboardPath -Name 'Get-LiveActivityState'
     Import-ScriptFunction -Path $dashboardPath -Name 'Get-LiveActivityText'
     Import-ScriptFunction -Path $guidedRunPath -Name 'Write-RunLog'
 }
 
 AfterAll {
-    foreach ($name in @('Get-GuiResultPresentation','Format-GuiTaskSummary','Receive-ProcessOutput','Get-DashboardStateStyle','Get-LiveActivityText','Write-RunLog')) {
+    foreach ($name in @('Get-GuiResultPresentation','Format-GuiTaskSummary','Receive-ProcessOutput','Get-DashboardStateStyle','Get-LiveActivityState','Get-LiveActivityText','Write-RunLog')) {
         Remove-Item -Path "Function:\global:$name" -ErrorAction SilentlyContinue
     }
 }
@@ -113,6 +114,123 @@ Describe 'Dashboard state and live activity' {
         $activity | Should -Match ([regex]::Escape($consolePath))
     }
 
+    It 'reads real <Tool> progress from the active operation' -ForEach @(
+        @{ Tool = 'DISM';   Marker = '[RUNNING] DISM-Health: Restoring the component store'; ExpectedOperation = 'DISM-Health: Restoring the component store'; Line = '[=================42.5%=================]'; Expected = 42.5 }
+        @{ Tool = 'SFC';    Marker = '[RUNNING] SFC: Verifying protected files';             ExpectedOperation = 'SFC: Verifying protected files';             Line = 'Verification 18% complete.'; Expected = 18.0 }
+        @{ Tool = 'CHKDSK'; Marker = '[RUNNING] CHKDSK-C: Scanning the file system';          ExpectedOperation = 'CHKDSK-C: Scanning the file system';          Line = 'Stage 4: 73 percent complete.'; Expected = 73.0 }
+        @{ Tool = 'WinGet'; Marker = '[RUNNING] WinGet: Downloading selected package';        ExpectedOperation = 'WinGet: Downloading selected package';        Line = "`e[32mDownloading package 67,4`e[0m%"; Expected = 67.4 }
+    ) {
+        $consolePath = Join-Path $TestDrive "$Tool-progress.txt"
+        @($Marker, $Line) | Set-Content -LiteralPath $consolePath -Encoding UTF8
+
+        $state = Get-LiveActivityState -Task 'HealthCheck' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:01:35')
+
+        $state.CurrentOperation | Should -Be $ExpectedOperation
+        $state.Percentage | Should -Be $Expected
+        $state.IsIndeterminate | Should -BeFalse
+        $state.ElapsedText | Should -Be '00:01:35'
+        $state.ConsoleText | Should -Not -Match ([regex]::Escape([string][char]27))
+    }
+
+    It 'uses indeterminate activity when the current operation emits no percentage' {
+        $consolePath = Join-Path $TestDrive 'no-percent.txt'
+        @('[RUNNING] WinGet: Reading installed applications','Reading WinGet package inventory…') | Set-Content -LiteralPath $consolePath -Encoding UTF8
+
+        $state = Get-LiveActivityState -Task 'InstalledApps' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:04')
+
+        $state.CurrentOperation | Should -Be 'WinGet: Reading installed applications'
+        $state.Percentage | Should -BeNullOrEmpty
+        $state.IsIndeterminate | Should -BeTrue
+    }
+
+    It 'keeps the current operation when its marker is older than the displayed output tail' {
+        $consolePath = Join-Path $TestDrive 'deep-marker.txt'
+        @('[RUNNING] DISM-Health: Analyzing the component store') + @(1..24 | ForEach-Object { "native output line $_" }) |
+            Set-Content -LiteralPath $consolePath -Encoding UTF8
+
+        $first = Get-LiveActivityState -Task 'HealthCheck' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:10') -MaximumLines 6 -ScanLines 40
+        25..450 | ForEach-Object { "native output line $_" } | Add-Content -LiteralPath $consolePath -Encoding UTF8
+        Add-Content -LiteralPath $consolePath -Value 'Analysis 51.25% complete.' -Encoding UTF8
+        $state = Get-LiveActivityState -Task 'HealthCheck' -ConsolePath $consolePath -PreviousState $first -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:20') -MaximumLines 6 -ScanLines 40
+
+        $state.CurrentOperation | Should -Be 'DISM-Health: Analyzing the component store'
+        $state.Percentage | Should -Be 51.25
+        $state.ConsoleText | Should -Match 'native output line 446'
+        $state.ConsoleText | Should -Match 'Analysis 51.25% complete\.'
+        $state.ConsoleText | Should -Not -Match 'native output line 445(?:\r?\n|$)'
+    }
+
+    It 'resets stale percentage when a new operation starts' {
+        $consolePath = Join-Path $TestDrive 'transition.txt'
+        @('[RUNNING] SFC: Verifying protected files','Verification 88% complete.') | Set-Content -LiteralPath $consolePath -Encoding UTF8
+        $first = Get-LiveActivityState -Task 'SystemRepair' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:20')
+        Add-Content -LiteralPath $consolePath -Value '[RUNNING] DISM-Health: Restoring the component store' -Encoding UTF8
+
+        $second = Get-LiveActivityState -Task 'SystemRepair' -ConsolePath $consolePath -PreviousState $first -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:21')
+
+        $first.Percentage | Should -Be 88
+        $second.CurrentOperation | Should -Be 'DISM-Health: Restoring the component store'
+        $second.Percentage | Should -BeNullOrEmpty
+        $second.IsIndeterminate | Should -BeTrue
+    }
+
+    It 'carries an incomplete operation record across polling reads' {
+        $consolePath = Join-Path $TestDrive 'split-record.txt'
+        Set-Content -LiteralPath $consolePath -Value '[RUNNING] DISM-Heal' -Encoding UTF8 -NoNewline
+
+        $first = Get-LiveActivityState -Task 'HealthRepair' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:01')
+        [IO.File]::AppendAllText($consolePath, "th: Restoring the component store`r`nVerification 12", [Text.UTF8Encoding]::new($false))
+        $second = Get-LiveActivityState -Task 'HealthRepair' -ConsolePath $consolePath -PreviousState $first -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:02')
+        [IO.File]::AppendAllText($consolePath, ",5% complete.`r`n", [Text.UTF8Encoding]::new($false))
+        $third = Get-LiveActivityState -Task 'HealthRepair' -ConsolePath $consolePath -PreviousState $second -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:03')
+
+        $first.OperationActive | Should -BeFalse
+        $second.CurrentOperation | Should -Be 'DISM-Health: Restoring the component store'
+        $second.Percentage | Should -BeNullOrEmpty
+        $third.CurrentOperation | Should -Be 'DISM-Health: Restoring the component store'
+        $third.Percentage | Should -Be 12.5
+    }
+
+    It 'resets stale percentage when a guided START step changes' {
+        $consolePath = Join-Path $TestDrive 'guided-console.txt'
+        $activityPath = Join-Path $TestDrive 'current-step.txt'
+        @('[RUNNING] SFC: Verifying protected files','Verification 64% complete.') | Set-Content -LiteralPath $consolePath -Encoding UTF8
+        'START 02-WindowsHealth' | Set-Content -LiteralPath $activityPath -Encoding UTF8
+        $first = Get-LiveActivityState -Task 'PreBackupRun' -ConsolePath $consolePath -ActivityPath $activityPath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:20')
+        Add-Content -LiteralPath $consolePath -Value 'Verification 100% complete.' -Encoding UTF8
+        'START 03-WinGetPreview' | Set-Content -LiteralPath $activityPath -Encoding UTF8
+
+        $second = Get-LiveActivityState -Task 'PreBackupRun' -ConsolePath $consolePath -ActivityPath $activityPath -PreviousState $first -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:00:21')
+
+        $second.CurrentOperation | Should -Be 'START 03-WinGetPreview'
+        $second.Percentage | Should -BeNullOrEmpty
+        $second.IsIndeterminate | Should -BeTrue
+    }
+
+    It 'treats result records as operation delimiters without changing final task status' {
+        $consolePath = Join-Path $TestDrive 'completed-operation.txt'
+        @('[RUNNING] DISM-Health: Restoring the component store','[=================100.0%=================]','[Completed] DISM-Health: The restore operation completed.') |
+            Set-Content -LiteralPath $consolePath -Encoding UTF8
+
+        $state = Get-LiveActivityState -Task 'HealthRepair' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:04:30')
+
+        $state.CurrentOperation | Should -Be 'Waiting for the next operation…'
+        $state.Percentage | Should -BeNullOrEmpty
+        $state.OperationActive | Should -BeFalse
+        (Get-DashboardStateStyle -State Running).Label | Should -Be 'RUNNING — Maintenance in progress'
+    }
+
+    It 'does not infer task success from one operation reaching 100 percent' {
+        $consolePath = Join-Path $TestDrive 'one-hundred.txt'
+        @('[RUNNING] CHKDSK-C: Scanning the file system','Stage 5: 100% complete.') | Set-Content -LiteralPath $consolePath -Encoding UTF8
+
+        $state = Get-LiveActivityState -Task 'SystemRepair' -ConsolePath $consolePath -StartedAt ([datetime]'2026-09-25T10:00:00') -Now ([datetime]'2026-09-25T10:03:00')
+
+        $state.Percentage | Should -Be 100
+        $state.OperationActive | Should -BeTrue
+        $state.TaskStatus | Should -Be 'Running'
+    }
+
     It 'writes the first activity line before the child exits and retains captured details' {
         $consolePath = Join-Path $TestDrive 'streamed-console.txt'
         $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
@@ -159,5 +277,19 @@ Describe 'Dashboard state and live activity' {
         $liveMessage | Should -Match 'START 02-WindowsHealth'
         Get-Content -LiteralPath $script:combinedLog -Raw | Should -Match 'START 02-WindowsHealth'
         Get-Content -LiteralPath $script:activityPath -Raw | Should -Match '^START 02-WindowsHealth'
+    }
+
+    It 'renders safe <Fixture> activity and result fixtures without running maintenance' -ForEach @(
+        @{ Fixture = 'running'; State = 'Running'; ExpectedOperation = 'DISM-Health: Restoring the component store'; ExpectedProgress = '42.5%'; ExpectedActions = 'disabled' }
+        @{ Fixture = 'finished'; State = 'Review'; ExpectedOperation = 'Finished — see saved result'; ExpectedProgress = 'Result saved'; ExpectedActions = 'enabled' }
+    ) {
+        $imagePath = Join-Path $TestDrive "$Fixture-dashboard.png"
+        $output = & (Get-Process -Id $PID).Path -NoLogo -NoProfile -STA -File $dashboardPath -UiTestOutput $imagePath -UiState $State 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 0
+        (Get-Item -LiteralPath $imagePath).Length | Should -BeGreaterThan 1000
+        $output | Should -Match "Current operation: $([regex]::Escape($ExpectedOperation))"
+        $output | Should -Match "Progress: $([regex]::Escape($ExpectedProgress))"
+        $output | Should -Match "Result actions: $ExpectedActions"
     }
 }

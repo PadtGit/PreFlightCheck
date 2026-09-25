@@ -32,20 +32,167 @@ function Get-DashboardStateStyle {
     }
 }
 
+function Get-LiveActivityState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Task,
+        [Parameter(Mandatory)][string]$ConsolePath,
+        [string]$ActivityPath,
+        [Parameter(Mandatory)][datetime]$StartedAt,
+        [datetime]$Now = [datetime]::Now,
+        [psobject]$PreviousState,
+        [ValidateRange(1, 100)][int]$MaximumLines = 14,
+        [ValidateRange(1, 2000)][int]$ScanLines = 300
+    )
+
+    $currentOperation = $Task
+    $percentage = $null
+    $operationActive = $false
+    $activityMarker = $null
+    $consoleOffset = [long]0
+    $pendingText = ''
+    if ($PreviousState) {
+        if ($PreviousState.PSObject.Properties['CurrentOperation']) { $currentOperation = [string]$PreviousState.CurrentOperation }
+        if ($PreviousState.PSObject.Properties['Percentage'] -and $null -ne $PreviousState.Percentage) { $percentage = [double]$PreviousState.Percentage }
+        if ($PreviousState.PSObject.Properties['OperationActive']) { $operationActive = [bool]$PreviousState.OperationActive }
+        if ($PreviousState.PSObject.Properties['ActivityMarker']) { $activityMarker = [string]$PreviousState.ActivityMarker }
+        if ($PreviousState.PSObject.Properties['ConsoleOffset']) { $consoleOffset = [long]$PreviousState.ConsoleOffset }
+        if ($PreviousState.PSObject.Properties['PendingText']) { $pendingText = [string]$PreviousState.PendingText }
+    }
+
+    $boundedScanLines = [Math]::Max($MaximumLines, $ScanLines)
+    $parseLines = @()
+    $displayLines = @()
+    if (Test-Path -LiteralPath $ConsolePath) {
+        $consoleFile = Get-Item -LiteralPath $ConsolePath -ErrorAction Stop
+        $displayLines = @(Get-Content -LiteralPath $consoleFile.FullName -Tail $MaximumLines -ErrorAction Stop)
+        $canContinue = $PreviousState -and $consoleOffset -ge 0 -and $consoleOffset -le $consoleFile.Length
+        if ($canContinue) {
+            if ($consoleOffset -lt $consoleFile.Length) {
+                $stream = [IO.FileStream]::new($consoleFile.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                try {
+                    [void]$stream.Seek($consoleOffset, [IO.SeekOrigin]::Begin)
+                    $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false), $true, 1024, $true)
+                    try { $appendedText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                    $consoleOffset = $stream.Position
+                } finally { $stream.Dispose() }
+                if ($appendedText) {
+                    $combinedText = $pendingText + $appendedText
+                    $completeRecords = [regex]::Matches($combinedText, '(?s)(?<Line>.*?)(?:\r\n|\n|\r)')
+                    $parseLines = @($completeRecords | ForEach-Object { $_.Groups['Line'].Value })
+                    $consumedCharacters = if ($completeRecords.Count -gt 0) { $completeRecords[$completeRecords.Count - 1].Index + $completeRecords[$completeRecords.Count - 1].Length } else { 0 }
+                    $pendingText = $combinedText.Substring($consumedCharacters)
+                }
+            }
+        } else {
+            $parseLines = @(Get-Content -LiteralPath $consoleFile.FullName -Tail $boundedScanLines -ErrorAction Stop)
+            $consoleOffset = $consoleFile.Length
+            if ($consoleFile.Length -gt 0) {
+                $tailStream = [IO.FileStream]::new($consoleFile.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                try {
+                    [void]$tailStream.Seek(-1, [IO.SeekOrigin]::End)
+                    $lastByte = $tailStream.ReadByte()
+                } finally { $tailStream.Dispose() }
+                if ($lastByte -notin @(10, 13) -and $parseLines.Count -gt 0) {
+                    $pendingText = [string]$parseLines[$parseLines.Count - 1]
+                    $parseLines = if ($parseLines.Count -gt 1) { @($parseLines | Select-Object -First ($parseLines.Count - 1)) } else { @() }
+                }
+            }
+        }
+    }
+    $ansiPattern = "$([char]27)\[[0-?]*[ -/]*[@-~]"
+    $displayLines = @($displayLines | ForEach-Object { ([string]$_).Replace([string][char]0, '') -replace $ansiPattern, '' })
+    if ($displayLines.Count -eq 0) { $displayLines = @('Waiting for worker output…') }
+
+    $operationMarkerSeen = $false
+    foreach ($lineValue in $parseLines) {
+        $line = ([string]$lineValue).Replace([string][char]0, '') -replace $ansiPattern, ''
+        if ($line -match '^\s*\[RUNNING\]\s*(?<Key>[^:]+):\s*(?<Description>.+?)\s*$') {
+            $currentOperation = "$($Matches.Key.Trim()): $($Matches.Description.Trim())"
+            $percentage = $null
+            $operationActive = $true
+            $operationMarkerSeen = $true
+            continue
+        }
+        if ($line -match '^\s*START\s+(?<Step>.+?)\s*$') {
+            $currentOperation = "START $($Matches.Step.Trim())"
+            $percentage = $null
+            $operationActive = $true
+            $activityMarker = $currentOperation
+            $operationMarkerSeen = $true
+            continue
+        }
+        if ($line -match '^\s*\[(?:Observed|Completed|Review|Failed)\]\s+') {
+            $currentOperation = 'Waiting for the next operation…'
+            $percentage = $null
+            $operationActive = $false
+            continue
+        }
+        if (-not $operationActive) { continue }
+
+        $percentMatches = [regex]::Matches($line, '(?<![\d.,])(?<Value>\d{1,3}(?:[.,]\d+)?)\s*(?:%|percent\b)', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($percentMatches.Count -eq 0) { continue }
+        $candidate = $percentMatches[$percentMatches.Count - 1].Groups['Value'].Value.Replace(',', '.')
+        $parsed = 0.0
+        if ([double]::TryParse($candidate, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsed) -and $parsed -ge 0 -and $parsed -le 100) {
+            $percentage = $parsed
+        }
+    }
+
+    if ($ActivityPath -and (Test-Path -LiteralPath $ActivityPath)) {
+        $guidedActivity = (Get-Content -LiteralPath $ActivityPath -Raw -ErrorAction Stop).Trim()
+        if ($guidedActivity -and $guidedActivity -ne $activityMarker) {
+            $activityMarker = $guidedActivity
+            if (-not $operationMarkerSeen) {
+                $currentOperation = $guidedActivity
+                $percentage = $null
+                $operationActive = $true
+            }
+        }
+    }
+
+    $elapsed = $Now - $StartedAt
+    if ($elapsed -lt [timespan]::Zero) { $elapsed = [timespan]::Zero }
+    $elapsedText = '{0:D2}:{1:D2}:{2:D2}' -f ([long][Math]::Floor($elapsed.TotalHours)), $elapsed.Minutes, $elapsed.Seconds
+    return [pscustomobject]@{
+        Task = $Task
+        TaskStatus = 'Running'
+        CurrentOperation = $currentOperation
+        Percentage = $percentage
+        IsIndeterminate = ($null -eq $percentage)
+        OperationActive = $operationActive
+        ActivityMarker = $activityMarker
+        ConsoleOffset = $consoleOffset
+        PendingText = $pendingText
+        ElapsedText = $elapsedText
+        ConsoleText = $displayLines -join [Environment]::NewLine
+    }
+}
+
 function Get-LiveActivityText {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Task,
         [Parameter(Mandatory)][string]$ConsolePath,
         [string]$ActivityPath,
-        [ValidateRange(1, 100)][int]$MaximumLines = 14
+        [ValidateRange(1, 100)][int]$MaximumLines = 14,
+        [datetime]$StartedAt = [datetime]::Now,
+        [datetime]$Now = [datetime]::Now,
+        [psobject]$PreviousState,
+        [ValidateRange(1, 2000)][int]$ScanLines = 300
     )
 
-    $activityLines = @()
-    if (Test-Path -LiteralPath $ConsolePath) { $activityLines = @(Get-Content -LiteralPath $ConsolePath -Tail $MaximumLines -ErrorAction Stop) }
-    if ($activityLines.Count -eq 0) { $activityLines = @('Waiting for worker output…') }
-    $currentActivity = if ($ActivityPath -and (Test-Path -LiteralPath $ActivityPath)) { (Get-Content -LiteralPath $ActivityPath -Raw -ErrorAction Stop).Trim() } else { $Task }
-    return (@("RUNNING — $Task", "Current step: $currentActivity", "Live activity (latest $MaximumLines lines)", "Detailed output: $ConsolePath", '') + $activityLines) -join [Environment]::NewLine
+    $state = Get-LiveActivityState -Task $Task -ConsolePath $ConsolePath -ActivityPath $ActivityPath -StartedAt $StartedAt -Now $Now -PreviousState $PreviousState -MaximumLines $MaximumLines -ScanLines $ScanLines
+    $progressText = if ($null -eq $state.Percentage) { 'Working…' } else { $state.Percentage.ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) + '%' }
+    return @(
+        "RUNNING — $Task"
+        "Current step: $($state.CurrentOperation)"
+        "Elapsed: $($state.ElapsedText)  Progress: $progressText"
+        "Live activity (latest $MaximumLines lines)"
+        "Detailed output: $ConsolePath"
+        ''
+        $state.ConsoleText
+    ) -join [Environment]::NewLine
 }
 
 Set-StrictMode -Version Latest
@@ -71,14 +218,16 @@ $script:healthReady = $false
 $script:taskStatus = 'IDLE — Ready'
 $script:lastPage = 'Runbook'
 $script:activeTask = $null
+$script:taskStartedAt = $null
+$script:liveActivityState = $null
 [xml]$layout = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="780" MinWidth="940" MinHeight="650" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="830" MinWidth="940" MinHeight="700" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
 <Window.Resources>
 <Style TargetType="Button"><Setter Property="Padding" Value="10,5"/><Setter Property="Margin" Value="0,0,8,4"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
 <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
 <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E9F1F7"/><Setter Property="Margin" Value="0,5,0,8"/></Style>
 </Window.Resources>
-<Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="260"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<Grid Margin="20" Background="#111A26"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="320"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock Text="PRE-BACKUP MAINTENANCE" FontSize="26" FontWeight="Bold"/><TextBlock x:Name="Session" Foreground="#ADC0D2" Margin="0,6,0,16"/></StackPanel>
 <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,6,0"><StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,3"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="SystemRepairButton" Content="System Corruption Scan - Run"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel></ScrollViewer>
@@ -93,12 +242,12 @@ $script:activeTask = $null
 </StackPanel></ScrollViewer>
 <WrapPanel Grid.Row="2"><Button x:Name="Preview" Content="Run review" Background="#14756C"/><Button x:Name="Apply" Content="Apply changes…" Background="#964B38"/></WrapPanel>
 </Grid></Grid>
-<Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="LIVE ACTIVITY / RESULT" Foreground="#74DCC7" FontWeight="Bold" VerticalAlignment="Center"/><Border x:Name="StatusBorder" Grid.Column="1" HorizontalAlignment="Right" Background="#172534" BorderBrush="#4A6178" BorderThickness="1" CornerRadius="3" Padding="9,4"><TextBlock x:Name="Status" Text="IDLE — Ready" Foreground="#ADC0D2" FontWeight="SemiBold"/></Border></Grid><TextBox x:Name="Console" Grid.Row="1" IsReadOnly="True" Background="#080D14" Foreground="#D7E7E1" FontFamily="Consolas" FontSize="13" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Choose a task. Live activity and the final result will appear here."/></Grid>
+<Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="LIVE ACTIVITY / RESULT" Foreground="#74DCC7" FontWeight="Bold" VerticalAlignment="Center"/><Border x:Name="StatusBorder" Grid.Column="1" HorizontalAlignment="Right" Background="#172534" BorderBrush="#4A6178" BorderThickness="1" CornerRadius="3" Padding="9,4"><TextBlock x:Name="Status" Text="IDLE — Ready" Foreground="#ADC0D2" FontWeight="SemiBold"/></Border></Grid><Grid Grid.Row="1" Margin="0,0,0,8"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="CurrentOperation" Text="Current operation: Waiting to start" Foreground="#E9F1F7" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ElapsedTask" Grid.Column="1" Text="Elapsed: 00:00:00" Foreground="#ADC0D2" Margin="16,0,0,0" TextWrapping="NoWrap"/></Grid><Grid Grid.Row="1" Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ProgressBar x:Name="ActivityProgress" Height="7" Minimum="0" Maximum="100" IsIndeterminate="False" Value="0" Foreground="#74DCC7" Background="#172534" BorderBrush="#2D5B68"/><TextBlock x:Name="ActivityProgressText" Grid.Column="1" Text="Ready" Foreground="#ADC0D2" HorizontalAlignment="Right" MinWidth="70" Margin="10,-5,0,0" TextWrapping="NoWrap"/></Grid></Grid><TextBox x:Name="Console" Grid.Row="2" IsReadOnly="True" Background="#080D14" Foreground="#D7E7E1" FontFamily="Consolas" FontSize="13" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Choose a task. Live activity and the final result will appear here."/></Grid>
 <DockPanel Grid.Row="3" Margin="0,12,0,0"><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button x:Name="OpenResults" Content="Open result summary" IsEnabled="False"/><Button x:Name="OpenResultFolder" Content="Open result folder" IsEnabled="False"/><Button x:Name="OpenGuide" Content="Guide"/></StackPanel><TextBlock Text="Detailed output is saved automatically." Foreground="#ADC0D2" VerticalAlignment="Center"/></DockPanel>
 </Grid></Window>
 '@
 $script:window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
-foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenResultFolder','OpenGuide','StatusBorder','Status')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
+foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenResultFolder','OpenGuide','StatusBorder','Status','CurrentOperation','ElapsedTask','ActivityProgress','ActivityProgressText')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
@@ -115,6 +264,25 @@ function Set-DashboardStatus {
     $Status.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Foreground)
     $StatusBorder.Background = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Background)
     $StatusBorder.BorderBrush = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Border)
+}
+function Set-LiveActivityPresentation {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Updates only dashboard presentation controls and performs no system state changes.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][psobject]$State)
+
+    $CurrentOperation.Text = "Current operation: $($State.CurrentOperation)"
+    $CurrentOperation.ToolTip = [string]$State.CurrentOperation
+    $ElapsedTask.Text = "Elapsed: $($State.ElapsedText)"
+    $ActivityProgress.Visibility = 'Visible'
+    if ($null -eq $State.Percentage) {
+        $ActivityProgress.IsIndeterminate = $true
+        $ActivityProgress.Value = 0
+        $ActivityProgressText.Text = 'Working…'
+    } else {
+        $ActivityProgress.IsIndeterminate = $false
+        $ActivityProgress.Value = [double]$State.Percentage
+        $ActivityProgressText.Text = $State.Percentage.ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) + '%'
+    }
 }
 Set-DashboardStatus -State Idle
 function Update-CleanupAvailability {
@@ -274,10 +442,14 @@ function Start-DashboardTask {
         foreach ($argument in @('-NoLogo','-NoProfile','-File',$worker,'-RequestPath',$requestPath)) { [void]$start.ArgumentList.Add($argument) }
         $script:active = [Diagnostics.Process]::Start($start)
         $script:activeTask = [string]$request.Task
+        $script:taskStartedAt = [datetime]::Now
+        $script:liveActivityState = $null
         $Tasks.IsEnabled = $false; $Options.IsEnabled = $false; $Preview.IsEnabled = $false; $Apply.IsEnabled = $false
         $OpenResults.IsEnabled = $false; $OpenResultFolder.IsEnabled = $false
         $currentStepPath = Join-Path -Path $runDirectory -ChildPath 'GuidedReport\current-step.txt'
-        $Console.Text = Get-LiveActivityText -Task $script:activeTask -ConsolePath (Join-Path -Path $runDirectory -ChildPath 'console.txt') -ActivityPath $currentStepPath
+        $script:liveActivityState = Get-LiveActivityState -Task $script:activeTask -ConsolePath (Join-Path -Path $runDirectory -ChildPath 'console.txt') -ActivityPath $currentStepPath -StartedAt $script:taskStartedAt
+        Set-LiveActivityPresentation -State $script:liveActivityState
+        $Console.Text = $script:liveActivityState.ConsoleText
         $Console.ScrollToEnd()
         Set-DashboardStatus -State Running
         Update-CleanupAvailability
@@ -310,6 +482,18 @@ $timer.Add_Tick({
     if (-not $script:active) { return }
     try {
         if ($script:active.HasExited) {
+            if ($script:taskStartedAt) {
+                try {
+                    $completedActivity = Get-LiveActivityState -Task $script:activeTask -ConsolePath (Join-Path -Path $runDirectory -ChildPath 'console.txt') -ActivityPath (Join-Path -Path $runDirectory -ChildPath 'GuidedReport\current-step.txt') -StartedAt $script:taskStartedAt -PreviousState $script:liveActivityState
+                    $ElapsedTask.Text = "Elapsed: $($completedActivity.ElapsedText)"
+                } catch {
+                    $fallbackElapsed = [datetime]::Now - $script:taskStartedAt
+                    $ElapsedTask.Text = 'Elapsed: {0:D2}:{1:D2}:{2:D2}' -f ([long][Math]::Floor($fallbackElapsed.TotalHours)), $fallbackElapsed.Minutes, $fallbackElapsed.Seconds
+                }
+            }
+            $ActivityProgress.IsIndeterminate = $false
+            $ActivityProgress.Value = 0
+            $ActivityProgress.Visibility = 'Collapsed'
             $completedRequestPath = Join-Path -Path $runDirectory -ChildPath 'request.json'
             if (Test-Path -LiteralPath $completedRequestPath) {
                 $completedRequest = Get-Content -LiteralPath $completedRequestPath -Raw | ConvertFrom-Json
@@ -317,6 +501,9 @@ $timer.Add_Tick({
             }
             $summaryPath = Join-Path -Path $runDirectory -ChildPath 'summary.txt'
             $hasSummary = Test-Path -LiteralPath $summaryPath
+            $CurrentOperation.Text = if ($hasSummary) { 'Current operation: Finished — see saved result' } else { 'Current operation: Finished — result unavailable' }
+            $CurrentOperation.ToolTip = $CurrentOperation.Text.Substring('Current operation: '.Length)
+            $ActivityProgressText.Text = if ($hasSummary) { 'Result saved' } else { 'Finished' }
             $Console.Text = if ($hasSummary) { Get-Content -LiteralPath $summaryPath -Raw } else { "ACTION NEEDED — No summary was saved.`r`nOpen the result folder for console.txt and report files." }
             $Console.ScrollToHome()
             $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
@@ -345,13 +532,17 @@ $timer.Add_Tick({
             } else { Set-DashboardStatus -State ActionNeeded -Label 'ACTION NEEDED — Result metadata missing'; $script:taskStatus = $Status.Text }
             $script:active.Dispose(); $script:active = $null
             $script:activeTask = $null
+            $script:taskStartedAt = $null
+            $script:liveActivityState = $null
             $Tasks.IsEnabled = $true; $Options.IsEnabled = $true; $Preview.IsEnabled = $true
             $OpenResults.IsEnabled = $true; $OpenResultFolder.IsEnabled = $true
             Update-CleanupAvailability
         } else {
             $activityPath = Join-Path -Path $runDirectory -ChildPath 'console.txt'
             $currentStepPath = Join-Path -Path $runDirectory -ChildPath 'GuidedReport\current-step.txt'
-            $Console.Text = Get-LiveActivityText -Task $script:activeTask -ConsolePath $activityPath -ActivityPath $currentStepPath
+            $script:liveActivityState = Get-LiveActivityState -Task $script:activeTask -ConsolePath $activityPath -ActivityPath $currentStepPath -StartedAt $script:taskStartedAt -PreviousState $script:liveActivityState
+            Set-LiveActivityPresentation -State $script:liveActivityState
+            $Console.Text = $script:liveActivityState.ConsoleText
             $Console.ScrollToEnd()
         }
     } catch { Set-DashboardStatus -State Running -Label 'RUNNING — Waiting for the next activity update' }
@@ -373,15 +564,27 @@ if ($UiTestOutput) {
     }
     Set-DashboardStatus -State $UiState
     if ($UiState -eq 'Running') {
-        $Console.Text = @('RUNNING — PreBackupRun','Current step: START 02-WindowsHealth','Live activity (latest 14 lines)','Detailed output: C:\GuiRuns\fixture\console.txt','','CHKDSK: scanning the file system…','SFC: verification in progress…','DISM: checking the component store…') -join [Environment]::NewLine
+        $CurrentOperation.Text = 'Current operation: DISM-Health: Restoring the component store'
+        $ElapsedTask.Text = 'Elapsed: 00:01:42'
+        $ActivityProgress.IsIndeterminate = $false
+        $ActivityProgress.Value = 42.5
+        $ActivityProgressText.Text = '42.5%'
+        $Console.Text = @('[RUNNING] DISM-Health: Restoring the component store','[=================42.5%=================]','Restoring the Windows component store…','Detailed output continues in the saved console log.') -join [Environment]::NewLine
     } elseif ($UiState -ne 'Idle') {
         $style = Get-DashboardStateStyle -State $UiState
+        $CurrentOperation.Text = 'Current operation: Finished — see saved result'
+        $ElapsedTask.Text = 'Elapsed: 00:06:18'
+        $ActivityProgress.IsIndeterminate = $false
+        $ActivityProgress.Value = 0
+        $ActivityProgress.Visibility = 'Collapsed'
+        $ActivityProgressText.Text = 'Result saved'
         $Console.Text = @($style.Label,'Task: PreBackupRun','Finished: 2026-09-23 10:11:12','Next: Review the saved result before continuing.','Detailed output: C:\GuiRuns\fixture\console.txt','Results: C:\GuiRuns\fixture') -join [Environment]::NewLine
         $OpenResults.IsEnabled = $true; $OpenResultFolder.IsEnabled = $true
     }
-    $surface = $window.Content; $surface.Measure([Windows.Size]::new(1080,740)); $surface.Arrange([Windows.Rect]::new(0,0,1080,740)); $surface.UpdateLayout()
-    $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1080,740,96,96,[Windows.Media.PixelFormats]::Pbgra32); $bitmap.Render($surface)
+    $surface = $window.Content; $surface.Measure([Windows.Size]::new(1080,790)); $surface.Arrange([Windows.Rect]::new(0,0,1080,790)); $surface.UpdateLayout()
+    $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1080,790,96,96,[Windows.Media.PixelFormats]::Pbgra32); $bitmap.Render($surface)
     $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new(); $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
     $stream = [IO.File]::Create([IO.Path]::GetFullPath($UiTestOutput)); try { $encoder.Save($stream) } finally { $stream.Dispose() }
-    Write-Output "PASS: seven dashboard pages and the $UiState state rendered; cleanup input limits were validated. No maintenance ran."
+    $resultActionState = if ($OpenResults.IsEnabled -and $OpenResultFolder.IsEnabled) { 'enabled' } else { 'disabled' }
+    Write-Output "PASS: seven dashboard pages and the $UiState state rendered. $($CurrentOperation.Text); Progress: $($ActivityProgressText.Text); Result actions: $resultActionState. Cleanup input limits were validated. No maintenance ran."
 } else { $timer.Start(); try { [void]$window.ShowDialog() } finally { $timer.Stop() } }

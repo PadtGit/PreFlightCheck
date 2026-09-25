@@ -92,7 +92,17 @@ function Invoke-LoggedProgram {
     [CmdletBinding()]
     param([string]$Name, [string]$FilePath, [string[]]$Arguments, [int[]]$AcceptedCodes = @(0))
     $log = Join-Path -Path $runDirectory -ChildPath ($Name + '.txt')
-    & $FilePath @Arguments 2>&1 | Out-File -LiteralPath $log -Encoding utf8 -WhatIf:$false
+    Write-Information -MessageData "[RUNNING] ${Name}: In progress..." -InformationAction Continue
+    # Forward native output on the information stream so callers still receive
+    # only the numeric exit code on the success stream. PowerShell also splits
+    # carriage-return progress redraws into records for live dashboard updates.
+    & $FilePath @Arguments 2>&1 | ForEach-Object {
+        # SFC can write UTF-16 output that Windows PowerShell exposes with NUL
+        # padding. Remove it so both live text and saved health conclusions read correctly.
+        $line = ([string]$_).Replace([string][char]0, '')
+        Write-Information -MessageData $line -InformationAction Continue
+        $line
+    } | Out-File -LiteralPath $log -Encoding utf8 -WhatIf:$false
     $code = $LASTEXITCODE
     if ($code -notin $AcceptedCodes) { throw "$Name returned $code. Review $log" }
     Add-Result -Step $Name -Status Observed -Detail "Exit $code. Full output: $log"
@@ -115,15 +125,19 @@ try {
     $identity = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     $admin = $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     $maintenance = $Mode -in @('Clean','Health','SystemRepair') -or $ApplicationId.Count -gt 0 -or $Uninstall -or $UpgradeAll
+    Write-Information -MessageData '[RUNNING] System: Reading Windows and BIOS information...' -InformationAction Continue
     $os = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $bios = Get-ItemProperty -LiteralPath 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS'
     $report.System = [pscustomobject]@{ Model = $bios.SystemProductName; Manufacturer = $bios.SystemManufacturer; BIOS = $bios.BIOSVersion; BIOSDate = $bios.BIOSReleaseDate; WindowsVersion = $os.DisplayVersion; Build = "$($os.CurrentBuild).$($os.UBR)"; Elevated = $admin; PowerShell = $PSVersionTable.PSVersion.ToString() }
     Add-Result -Step System -Status Observed -Detail ($report.System | ConvertTo-Json -Compress)
+    Write-Information -MessageData '[RUNNING] Restart: Checking pending restart markers...' -InformationAction Continue
     $report.Restart = Get-PendingRestartState
     if ($report.Restart.Pending -or $report.Restart.Unknown.Count -gt 0) {
         Add-Result -Step Restart -Status Review -Detail ($report.Restart | ConvertTo-Json -Compress)
     } else { Add-Result -Step Restart -Status Observed -Detail 'No common restart markers found; this does not prove Windows Update is idle.' }
+    Write-Information -MessageData '[RUNNING] Power: Checking AC power...' -InformationAction Continue
     try { $report.Power = Get-AcPowerState } catch { Add-Result -Step Power -Status Failed -Detail $_.Exception.Message }
+    Write-Information -MessageData '[RUNNING] Storage: Reading disk and volume health...' -InformationAction Continue
     try {
         # Read-only storage modules create noisy alias messages when the caller uses WhatIf.
         $savedWhatIf = $WhatIfPreference
@@ -149,6 +163,7 @@ try {
         catch { Add-Result -Step VSS -Status Failed -Detail $_.Exception.Message }
     } else { Add-Result -Step VSS -Status Review -Detail 'Run elevated to collect VSS diagnostics. Writer health has not been verified.' }
     try {
+        Write-Information -MessageData '[RUNNING] Events: Reviewing recent system and application errors...' -InformationAction Continue
         $events = @(Get-WinEvent -FilterHashtable @{ LogName = @('System','Application'); Level = @(1,2); StartTime = (Get-Date).AddDays(-3) } -MaxEvents 100 -ErrorAction Stop)
         $events | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | Export-Csv -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'events.csv') -NoTypeInformation -Encoding UTF8 -WhatIf:$false
         Add-Result -Step Events -Status Review -Detail "$($events.Count) recent error/critical events captured (maximum 100); occurrence alone is not proof of corruption."
@@ -157,6 +172,7 @@ try {
         else { Add-Result -Step Events -Status Failed -Detail $_.Exception.Message }
     }
     try {
+        Write-Information -MessageData '[RUNNING] Defender: Reading antivirus protection status...' -InformationAction Continue
         Get-MpComputerStatus | Select-Object AMRunningMode,AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureLastUpdated,QuickScanAge | ConvertTo-Json | Out-File -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'defender.json') -Encoding utf8 -WhatIf:$false
         Add-Result -Step Defender -Status Observed -Detail 'Status recorded; no malware-free certification. Passive mode may reflect another antivirus product.'
     } catch { Add-Result -Step Defender -Status Review -Detail $_.Exception.Message }
@@ -166,6 +182,7 @@ try {
     foreach ($root in $tempRoots) {
         try {
             $inventoryWarnings = @()
+            Write-Information -MessageData "[RUNNING] TempInventory: Scanning $root for files older than $MinimumAgeDays days..." -InformationAction Continue
             $report.TempCandidates += @(Get-AgedTemporaryFile -Root $root -MinimumAgeDays $MinimumAgeDays -WarningVariable inventoryWarnings)
             if ($inventoryWarnings.Count -gt 0) { Add-Result -Step TempInventory -Status Review -Detail ($inventoryWarnings -join [Environment]::NewLine) }
         }
@@ -184,6 +201,7 @@ try {
         foreach ($root in $tempRoots) {
             if ($PSCmdlet.ShouldProcess($root, "Remove only regular temporary files older than $MinimumAgeDays days")) {
                 $cleanupWarnings = @()
+                Write-Information -MessageData "[RUNNING] TempCleanup: Cleaning eligible files in $root..." -InformationAction Continue
                 $cleanupResult = Remove-AgedTemporaryFile -Root $root -MinimumAgeDays $MinimumAgeDays -Confirm:$false -WarningVariable cleanupWarnings
                 $report.Cleanup += $cleanupResult
                 $cleanupStatus = 'Completed'
@@ -193,10 +211,12 @@ try {
             }
         }
         if ($EmptyRecycleBin -and $PSCmdlet.ShouldProcess('Current user Recycle Bin on all drives', 'Permanently empty reviewed contents')) {
+            Write-Information -MessageData '[RUNNING] RecycleBin: Emptying the reviewed Recycle Bin...' -InformationAction Continue
             Clear-RecycleBin -Force -ErrorAction Stop
             Add-Result -Step RecycleBin -Status Completed -Detail 'Current user Recycle Bin emptied.'
         }
         if ($ClearDeliveryCache -and $PSCmdlet.ShouldProcess('Delivery Optimization cache', 'Delete cached delivery files')) {
+            Write-Information -MessageData '[RUNNING] DeliveryCache: Clearing Delivery Optimization cache...' -InformationAction Continue
             Delete-DeliveryOptimizationCache -Force -ErrorAction Stop
             Add-Result -Step DeliveryCache -Status Completed -Detail 'Delivery Optimization cache cleared.'
         }
@@ -216,6 +236,7 @@ try {
             } else {
                 Add-Result -Step SystemRepair -Status Completed -Detail 'WinUtil-style system corruption scan completed.'
             }
+            Write-Information -MessageData '[RUNNING] RestartAfterSystemRepair: Checking restart state after repair...' -InformationAction Continue
             $report.RestartAfter = Get-PendingRestartState
             if ($report.RestartAfter.Pending -or $report.RestartAfter.Unknown.Count -gt 0) {
                 $report.RestartRequired = $true
@@ -271,6 +292,7 @@ try {
         }
         if ($ComponentCleanup -and $PSCmdlet.ShouldProcess('Windows component store', 'Remove superseded components; bypass normal cleanup grace period')) {
             if (-not $componentHealthy) { throw 'Component cleanup requires an explicit healthy or repaired DISM conclusion in this run. Review the log.' }
+            Write-Information -MessageData '[RUNNING] RestartBeforeCleanup: Checking restart state...' -InformationAction Continue
             $restartBeforeCleanup = Get-PendingRestartState
             if ($restartBeforeCleanup.Pending -or $restartBeforeCleanup.Unknown.Count -gt 0) { throw 'Restart state changed during health work. Review before component cleanup.' }
             $cleanupCode = Invoke-LoggedProgram -Name ComponentCleanup -FilePath "$env:SystemRoot\System32\DISM.exe" -Arguments @('/Online','/English','/Cleanup-Image','/StartComponentCleanup') -AcceptedCodes @(0,3010)
@@ -279,6 +301,7 @@ try {
                 Add-Result -Step ComponentCleanup -Status Review -Detail 'RESTART REQUIRED: restart Windows before cleanup or backup.'
             }
         }
+        Write-Information -MessageData '[RUNNING] RestartAfterHealth: Checking restart state after health checks...' -InformationAction Continue
         $report.RestartAfter = Get-PendingRestartState
         if ($report.RestartAfter.Pending -or $report.RestartAfter.Unknown.Count -gt 0) {
             $report.RestartRequired = $true
@@ -292,6 +315,7 @@ try {
         elseif ($RepairWindows) { Add-Result -Step HealthGate -Status Review -Detail 'Cleanup remains locked. Review the repair logs, restart if requested, then explicitly run Windows health checks before cleanup.' }
     }
     if ($Mode -eq 'Updates') {
+        Write-Information -MessageData '[RUNNING] SoftwareInventory: Reading installed application information...' -InformationAction Continue
         $uninstallRoots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
         foreach ($registryRoot in $uninstallRoots) {
             if (Test-Path -LiteralPath $registryRoot) {
@@ -305,6 +329,7 @@ try {
         # Never execute a PATH-resolved or otherwise user-supplied executable while elevated.
         $wingetPath = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\WindowsApps\winget.exe'
         $wingetTrusted = $false
+        Write-Information -MessageData '[RUNNING] WinGet: Checking availability and publisher signature...' -InformationAction Continue
         try {
             $wingetItem = Get-Item -LiteralPath $wingetPath -Force -ErrorAction Stop
             $windowsAppsRoot = [IO.Path]::GetFullPath((Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\WindowsApps')).TrimEnd('\') + '\'
@@ -339,6 +364,7 @@ try {
             }
             if ($UpgradeAll -and $PSCmdlet.ShouldProcess('All supported applications', 'Upgrade all WinGet applications')) {
                 [void](Invoke-LoggedProgram -Name UpgradeAll -FilePath $wingetPath -Arguments @('upgrade','--all','--disable-interactivity'))
+                Write-Information -MessageData '[RUNNING] RestartAfterUpgradeAll: Checking restart state after updates...' -InformationAction Continue
                 $upgradeAllRestart = Get-PendingRestartState
                 if ($upgradeAllRestart.Pending -or $upgradeAllRestart.Unknown.Count -gt 0) {
                     $report.RestartRequired = $true
@@ -350,6 +376,7 @@ try {
                     $wingetAction = if ($Uninstall) { @('uninstall','--id',$id,'--exact','--disable-interactivity') } else { @('install','--id',$id,'--exact','--disable-interactivity') }
                     $actionName = if ($Uninstall) { 'Uninstall' } else { 'InstallUpgrade' }
                     [void](Invoke-LoggedProgram -Name "$actionName-$id" -FilePath $wingetPath -Arguments $wingetAction)
+                    Write-Information -MessageData '[RUNNING] RestartAfterUpdate: Checking restart state after application changes...' -InformationAction Continue
                     $restartAfterUpdate = Get-PendingRestartState
                     if ($restartAfterUpdate.Pending -or $restartAfterUpdate.Unknown.Count -gt 0) {
                         $report.RestartRequired = $true
@@ -369,6 +396,7 @@ try {
     else { Write-Error -Message $_.Exception.Message -ErrorAction Continue }
 } finally {
     if ($null -ne $report) {
+        Write-Information -MessageData '[RUNNING] FinalSpace: Measuring free space after the task...' -InformationAction Continue
         try {
             $savedWhatIf = $WhatIfPreference
             try { $WhatIfPreference = $false; $report.VolumesAfter = @(Get-Volume | Select-Object DriveLetter,UniqueId,SizeRemaining) }
@@ -383,6 +411,7 @@ try {
         if ($report.RestartRequired -or $report.RepairRecommended -or @($report.Results | Where-Object { $_.Status -in @('Review','Failed') }).Count -gt 0) {
             $report.HealthReady = $false
         }
+        Write-Information -MessageData '[RUNNING] Reports: Saving results and review findings...' -InformationAction Continue
         $report | ConvertTo-Json -Depth 8 | Out-File -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'report.json') -Encoding utf8 -WhatIf:$false
         $report.Results | Export-Csv -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'steps.csv') -NoTypeInformation -Encoding UTF8 -WhatIf:$false
         Write-Information -MessageData "Reports: $runDirectory. Review warnings and tool output; backup restorability is not certified." -InformationAction Continue

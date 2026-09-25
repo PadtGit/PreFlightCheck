@@ -14,6 +14,7 @@
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Write-Information -MessageData '[RUNNING] DellReview: Reading the model and installed BIOS...' -InformationAction Continue
 $bios = Get-ItemProperty -LiteralPath 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS'
 Write-Information -MessageData "Model: $($bios.SystemProductName); installed BIOS: $($bios.BIOSVersion); firmware date: $($bios.BIOSReleaseDate)" -InformationAction Continue
 if ($bios.SystemManufacturer -notmatch 'Dell' -or $bios.SystemProductName -ne 'G5 5590') {
@@ -21,5 +22,6 @@ if ($bios.SystemManufacturer -notmatch 'Dell' -or $bios.SystemProductName -ne 'G
 }
 Write-Information -MessageData 'Review once a week. Before installing: have a working backup, connect AC, close apps, and read the package instructions. For BIOS, confirm the recovery key is accessible and follow Dell BitLocker guidance. Restart when requested and verify protection afterward.' -InformationAction Continue
 if ($PSCmdlet.ShouldProcess('Official Dell G5 5590 support page', 'Open weekly driver and firmware review')) {
+    Write-Information -MessageData '[RUNNING] DellReview: Opening the official support page for attended review...' -InformationAction Continue
     Start-Process -FilePath 'https://www.dell.com/support/home/en-us/product-support/product/g-series-15-5590-laptop/drivers' -WindowStyle Normal
 }

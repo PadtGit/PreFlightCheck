@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 - 2026-09-25
+
+- Forward native check output to the dashboard while each tool is running, including carriage-return progress updates from tools such as DISM, SFC, and CHKDSK; retain complete per-tool logs and numeric exit-code handling.
+- Remove invisible NUL padding from SFC-style Unicode output so progress text and saved health conclusions remain readable under Windows PowerShell 5.1.
+- Show the active operation throughout inventory, health, updates, cleanup, Dell review, and report saving, with elapsed time and a modestly taller live activity panel.
+- Display a tool-provided percentage for the current operation when available and activity feedback otherwise; reset progress between checks and keep warning, restart, repair, and failure outcomes distinct.
+- Preserve the finished summary and direct result/report actions, guided-run warnings, and cleanup eligibility checks.
+- Validate streaming with a harmless Windows PowerShell 5.1 child process, plus dashboard fixtures and existing safety regressions.
+
 ## 0.3.1 - 2026-09-20
 
 - Kept cleanup locked after either repair action; the operator must explicitly run the normal Windows Health Check after reviewing repair logs and restarting if requested.
