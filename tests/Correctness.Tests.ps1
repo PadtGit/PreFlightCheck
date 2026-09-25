@@ -226,11 +226,15 @@ Describe 'Dashboard health eligibility from completed tasks' {
         [void][IO.Directory]::CreateDirectory($script:runDirectory)
         $script:healthReady = $true
         $script:lastPage = 'Health'
+        $script:taskStartedAt = $null
+        $script:liveActivityState = $null
         $script:active = [pscustomobject]@{ HasExited = $true }
         $script:active | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
         $Console = [pscustomobject]@{ Text = '' }
         $Console | Add-Member -MemberType ScriptMethod -Name ScrollToHome -Value { }
         $Status = [pscustomobject]@{ Text = '' }
+        foreach ($name in @('CurrentOperation','ElapsedTask','ActivityProgressText')) { Set-Variable -Name $name -Value ([pscustomobject]@{ Text = ''; ToolTip = '' }) }
+        $ActivityProgress = [pscustomobject]@{ IsIndeterminate = $true; Value = 25; Visibility = 'Visible' }
         foreach ($name in @('Tasks','Options','Preview','Apply','OpenResults','OpenResultFolder')) { Set-Variable -Name $name -Value ([pscustomobject]@{ IsEnabled = $false }) }
         Set-Content (Join-Path $runDirectory 'summary.txt') 'Fixture summary'
     }
@@ -275,8 +279,11 @@ Describe 'Cleanup action availability' {
         $script:active = $null
         $script:healthReady = $false
         $script:taskStatus = 'Ready'
-        foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status','OpenResults','OpenResultFolder')) {
-            Set-Variable -Name $name -Value ([pscustomobject]@{ Visibility = ''; Text = ''; Content = ''; IsChecked = $false; IsEnabled = $true })
+        $script:taskStartedAt = $null
+        $script:liveActivityState = $null
+        $ActivityProgress = [pscustomobject]@{ IsIndeterminate = $true; Value = 25; Visibility = 'Visible' }
+        foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status','OpenResults','OpenResultFolder','CurrentOperation','ElapsedTask','ActivityProgressText')) {
+            Set-Variable -Name $name -Value ([pscustomobject]@{ Visibility = ''; Text = ''; ToolTip = ''; Content = ''; IsChecked = $false; IsEnabled = $true })
         }
         $Status.Text = 'Ready'
         $Console = [pscustomobject]@{ Text = '' }
