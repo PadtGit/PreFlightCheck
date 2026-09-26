@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification = 'Pester resolves variables assigned in BeforeAll inside later It blocks; static analysis does not follow that framework scope.')]
+param()
+
 BeforeAll {
     $repositoryRoot = Split-Path -Parent $PSScriptRoot
 
@@ -23,19 +26,25 @@ BeforeAll {
 
     $workerPath = Join-Path $repositoryRoot 'Invoke-GuiTask.ps1'
     $dashboardPath = Join-Path $repositoryRoot 'Start-Maintenance.ps1'
+    $dashboardCorePath = Join-Path $repositoryRoot 'Dashboard.Core.psm1'
     $guidedRunPath = Join-Path $repositoryRoot 'Invoke-PreBackupRun.ps1'
-    Import-ScriptFunction -Path $workerPath -Name 'Get-GuiResultPresentation'
-    Import-ScriptFunction -Path $workerPath -Name 'Format-GuiTaskSummary'
+    Import-Module -Name $dashboardCorePath -Force -ErrorAction Stop
     Import-ScriptFunction -Path $workerPath -Name 'Receive-ProcessOutput'
-    Import-ScriptFunction -Path $dashboardPath -Name 'Get-DashboardStateStyle'
-    Import-ScriptFunction -Path $dashboardPath -Name 'Get-LiveActivityState'
-    Import-ScriptFunction -Path $dashboardPath -Name 'Get-LiveActivityText'
     Import-ScriptFunction -Path $guidedRunPath -Name 'Write-RunLog'
 }
 
 AfterAll {
-    foreach ($name in @('Get-GuiResultPresentation','Format-GuiTaskSummary','Receive-ProcessOutput','Get-DashboardStateStyle','Get-LiveActivityState','Get-LiveActivityText','Write-RunLog')) {
+    Remove-Module -Name Dashboard.Core -Force -ErrorAction SilentlyContinue
+    foreach ($name in @('Receive-ProcessOutput','Write-RunLog')) {
         Remove-Item -Path "Function:\global:$name" -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'Dashboard core module' {
+    It 'exports the pure dashboard and worker presentation helpers' {
+        foreach ($name in @('Get-DashboardStateStyle','Get-GuiResultPresentation','Format-GuiTaskSummary','Get-LiveActivityState','Get-LiveActivityText')) {
+            (Get-Command -Name $name -Module Dashboard.Core -ErrorAction Stop).Name | Should -Be $name
+        }
     }
 }
 

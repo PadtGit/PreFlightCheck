@@ -1,0 +1,26 @@
+name: Attach ready-to-run ZIP
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: windows-latest
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build and upload archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $expectedTag = 'v' + (Get-Content VERSION -Raw).Trim()
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Release tag $env:GITHUB_REF_NAME does not match VERSION $expectedTag."
+          }
+          $archive = ./tools/New-ReleaseArchive.ps1
+          gh release upload $env:GITHUB_REF_NAME $archive --repo $env:GITHUB_REPOSITORY

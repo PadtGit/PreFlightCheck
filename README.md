@@ -2,17 +2,19 @@
 
 **Clean system, smaller backup, faster restore.**
 
-Version: `0.4.1`
+Version: `0.4.2` (in development)
 
 Windows 11 pre-backup maintenance toolkit — integrity checks, disk cleanup, and health reports before your Veeam job runs.
 
 ## Quick start
 
-1. Download or clone this repository and keep all script and module files together.
+1. Download or clone this repository and keep all script and module files together. If a GitHub release includes a ready-to-run ZIP asset, you can extract that instead of the source archive.
 2. Install 64-bit PowerShell 7 in its standard location (`C:\Program Files\PowerShell\7`). Windows PowerShell 5.1 is also required for the maintenance worker.
 3. Double-click `Start-Maintenance.cmd`, approve the Administrator prompt, and choose **Run pre-backup sequence**.
 
-The dashboard always requests Administrator permission so System Review can collect VSS writer and shadow-storage details. Command-line examples below use **Windows PowerShell 5.1**, elevated for cleanup, health checks, and full diagnostics. WinGet is required for application updates.
+The dashboard always requests Administrator permission so System Review can collect VSS writer and shadow-storage details. Command-line examples below use **Windows PowerShell 5.1**, elevated for cleanup, health checks, and full diagnostics. [WinGet is available through Microsoft's App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/) and is required for application updates.
+
+For contributors, see the repository's [CONTRIBUTING.md](https://github.com/PadtGit/PreFlightCheck/blob/main/CONTRIBUTING.md) for the exact local test commands. Maintainers can build the release ZIP from the repository with `./tools/New-ReleaseArchive.ps1`; publishing a GitHub release attaches that archive automatically. PreFlightCheck is available under the [MIT license](LICENSE).
 
 ## Features
 

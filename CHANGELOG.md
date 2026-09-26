@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 - 2026-09-25
+
+- Reject unconfirmed Upgrade all before gathering system inventory or creating reports.
+- Run System Corruption Scan tools directly with discrete arguments while keeping live output, logs, and exit-code handling.
+- Move pure dashboard display helpers into a module so their tests can import them without executing the UI.
+- Add an MIT license, contributor test instructions, and a ready-to-run release archive builder and upload workflow.
+
 ## 0.4.1 - 2026-09-25
 
 - Forward native check output to the dashboard while each tool is running, including carriage-return progress updates from tools such as DISM, SFC, and CHKDSK; retain complete per-tool logs and numeric exit-code handling.

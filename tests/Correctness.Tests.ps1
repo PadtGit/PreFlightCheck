@@ -5,10 +5,11 @@ BeforeAll {
     $repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
     $maintenancePath = Join-Path $repositoryRoot 'PreBackupMaintenance.ps1'
     $dashboardPath = Join-Path $repositoryRoot 'Start-Maintenance.ps1'
+    Import-Module -Name (Join-Path $repositoryRoot 'Dashboard.Core.psm1') -Force -ErrorAction Stop
     $maintenanceAst = [System.Management.Automation.Language.Parser]::ParseFile($maintenancePath, [ref]$null, [ref]$null)
     $dashboardAst = [System.Management.Automation.Language.Parser]::ParseFile($dashboardPath, [ref]$null, [ref]$null)
     $script:taskStatus = 'Ready'
-    foreach ($functionName in @('Get-DashboardStateStyle', 'Update-CleanupAvailability', 'Show-DashboardWarning')) {
+    foreach ($functionName in @('Update-CleanupAvailability', 'Show-DashboardWarning')) {
         $node = $dashboardAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $ast.Name -eq $functionName }, $true)
         if ($node) { . ([scriptblock]::Create($node.Extent.Text)) }
     }
