@@ -5,9 +5,11 @@ BeforeAll {
     $repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
     $maintenanceScript = Join-Path $repositoryRoot 'PreBackupMaintenance.ps1'
     $coreModule = Join-Path $repositoryRoot 'Maintenance.Core.psm1'
+    $verifyWorkflow = Join-Path $repositoryRoot '.github/workflows/verify.yml'
     $maintenanceText = Get-Content -LiteralPath $maintenanceScript -Raw
     $coreText = Get-Content -LiteralPath $coreModule -Raw
     $analysisText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Raw
+    $verifyWorkflowText = Get-Content -LiteralPath $verifyWorkflow -Raw
 }
 
 Describe 'PreBackupMaintenance safety contract' {
@@ -147,6 +149,13 @@ Describe 'Release 0.3.0 regression contract' {
         $analysisText | Should -Match 'IsSuppressed'
         $analysisText | Should -Match '\$maximumAnalyzerAttempts = 3'
         $analysisText | Should -Match '\$pathErrors'
+    }
+
+    It 'retries the analyzer gate from a fresh PowerShell process in CI' {
+        $verifyWorkflowText | Should -Match 'shell: cmd'
+        $verifyWorkflowText | Should -Match 'for /L %%A in \(1,1,3\)'
+        $verifyWorkflowText | Should -Match 'pwsh -NoLogo -NoProfile -File ./tools/Invoke-FullScriptAnalysis\.ps1'
+        $verifyWorkflowText | Should -Match 'PSScriptAnalyzer attempt %%A failed'
     }
 
     It 'does not pass the unsupported upgrade switch to winget install' {
