@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.2 - in development
+## 0.4.2 - 2026-09-25
 
 - Reject unconfirmed Upgrade all before gathering system inventory or creating reports.
 - Run System Corruption Scan tools directly with discrete arguments while keeping live output, logs, and exit-code handling.
