@@ -294,7 +294,7 @@
     # 5. Pour lister toutes les règles : Get-ScriptAnalyzerRule
     #
     # UTILISATION :
-    # Invoke-ScriptAnalyzer -Path "script.ps1" -Settings "PSScriptAnalyzerSettings.psd1"
+    # Invoke-ScriptAnalyzer -Path "script.ps1" -Settings "PSScriptAnalyzerSettingsFull.psd1"
     #
     # ============================================================================
 }

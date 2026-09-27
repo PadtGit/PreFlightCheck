@@ -1,7 +1,7 @@
 # PreFlightCheck agent instructions
 
-Windows 11 pre-backup maintenance toolkit. Repository:
-https://github.com/PadtGit/PreFlightCheck (default branch `main`). Read
+Windows 11 pre-backup maintenance toolkit. Repository: `PadtGit/PreFlightCheck`
+(default branch `main`). Read
 [CONTRIBUTING.md](CONTRIBUTING.md) and the relevant source before changing anything.
 
 ## Runtime map
@@ -32,9 +32,9 @@ $config.TestRegistry.Enabled = $false; Invoke-Pester -Configuration $config
 ./tools/Invoke-FullScriptAnalysis.ps1
 ```
 
-CI (`.github/workflows/verify.yml`) also parses every PS5.1 file with Windows PowerShell.
+CI ([`.github/workflows/verify.yml`](.github/workflows/verify.yml)) also parses every PS5.1 file with Windows PowerShell.
 Releases: bump `VERSION`, update `CHANGELOG.md`, publish a GitHub release tagged `v<VERSION>`;
-`release-archive.yml` attaches the ZIP.
+[`.github/workflows/release-archive.yml`](.github/workflows/release-archive.yml) attaches the ZIP.
 
 ## Skills
 
@@ -55,7 +55,7 @@ Install locations:
 
 Edit `.claude/skills` first, then copy the change to `.agents/skills`:
 `Copy-Item .claude/skills/* .agents/skills/ -Recurse -Force`. `tests/AgentSkills.Tests.ps1`
-fails CI when the two copies differ. Older user-level copies in `~/.codex/skills` are not needed.
+fails CI when the two copies differ.
 
-Claude Code also loads `.claude/settings.json`, whose `Block-LiveMaintenance.ps1` hook refuses
+Claude Code also loads `.claude/settings.json`, whose `.claude/hooks/Block-LiveMaintenance.ps1` hook refuses
 shell commands that would run a maintenance entry point without `-WhatIf`.

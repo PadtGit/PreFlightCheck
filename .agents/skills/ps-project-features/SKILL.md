@@ -21,6 +21,7 @@ PreFlightCheck's expected split is a PS7 dashboard with PS5.1 cleanup/health/dia
 | Maintenance orchestration | Consume the function in PreBackupMaintenance.ps1 |
 | Dashboard task execution | Wire into Invoke-GuiTask.ps1 |
 | Dashboard entry | Add to Start-Maintenance.ps1's appropriate sidebar section |
+| Shared dashboard display helper | Export from Dashboard.Core.psm1 (PowerShell 7 only) |
 
 Use this map for PreFlightCheck; inspect equivalent integration points in other repositories rather than creating these filenames there.
 
@@ -39,6 +40,6 @@ The guarded sequence is review -> health -> update preview -> cleanup preview ->
 
 Validate supported runtime compatibility and relevant CLI/dashboard flows using existing checks, safe previews, or mocks. Do not execute system-changing maintenance merely to test integration. State unavailable runtimes or untested paths.
 
-When the feature is finalized, update `CHANGELOG.md` and bump `VERSION` according to the repository convention. Ask before choosing a version segment when that convention and Bob's request leave it unclear. Do not invent release files for a repository that uses another mechanism.
+When the feature is finalized, document it under `Unreleased` in `CHANGELOG.md`. Bump `VERSION` only when preparing a release. Ask before choosing a version segment when that convention and Bob's request leave it unclear. Do not invent release files for a repository that uses another mechanism.
 
 Apply authorized related changes together. Report what changed, where it is exposed, and validation results concisely. For visual changes, consult [ps-project-ux](../ps-project-ux/SKILL.md); for a broader review, consult [ps-project-polish](../ps-project-polish/SKILL.md).
