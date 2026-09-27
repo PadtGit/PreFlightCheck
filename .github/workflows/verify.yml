@@ -29,6 +29,26 @@ jobs:
             Sort-Object Name, Version -Descending |
             Select-Object -First 4 Name, Version, Path
 
+      - name: Parse PS5.1 files with Windows PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(git ls-files -- '*.ps1' '*.psm1' |
+            Where-Object { Select-String -LiteralPath $_ -Pattern '^#Requires -Version 5\.1' -Quiet })
+          if ($files.Count -eq 0) { throw 'No PS5.1 files found to parse.' }
+          $failed = 0
+          foreach ($file in $files) {
+            $parseErrors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $file).Path, [ref]$null, [ref]$parseErrors)
+            foreach ($parseError in $parseErrors) {
+              $failed++
+              Write-Output ('{0}:{1}: {2}' -f $file, $parseError.Extent.StartLineNumber, $parseError.Message)
+            }
+          }
+          Write-Output "Parsed $($files.Count) file(s) with PowerShell $($PSVersionTable.PSVersion)."
+          if ($failed -gt 0) { throw "$failed PS5.1 parse error(s)." }
+
       - name: Run Pester safety tests
         shell: pwsh
         run: |
