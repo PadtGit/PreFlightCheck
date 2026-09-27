@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add shared agent instructions and matching repository skills for Codex and Claude Code, with a test that detects drift between the skill copies.
+- Add a Claude Code hook that blocks live maintenance entry points without `-WhatIf`.
+- Parse PowerShell 5.1 scripts with Windows PowerShell in CI and add monthly updates for pinned GitHub Actions.
+- Align contributor and release documentation with the agent setup and published v0.4.2 release.
+
 ## 0.4.2 - 2026-09-25
 
 - Reject unconfirmed Upgrade all before gathering system inventory or creating reports.

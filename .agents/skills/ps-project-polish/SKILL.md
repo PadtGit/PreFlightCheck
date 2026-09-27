@@ -18,8 +18,9 @@ Read actual source files, project instructions, callers, and relevant tests befo
 | Surface | Expected scope; verify in source |
 |---|---|
 | Start-Maintenance.ps1 dashboard | PS7 |
+| Dashboard.Core.psm1 | PS7 dashboard display helpers |
 | Cleanup, health, diagnostics scripts | PS5.1, elevated where required |
-| Maintenance.Core.psm1 | Shared maintenance logic; compatible with every supported caller |
+| Maintenance.Core.psm1 | Shared maintenance logic; PS5.1-compatible for its callers |
 | PreBackupMaintenance.ps1 | Consumes exported maintenance functions |
 | Invoke-GuiTask.ps1 | Dashboard task wiring |
 

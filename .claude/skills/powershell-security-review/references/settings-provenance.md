@@ -1,6 +1,6 @@
 # Bundled settings provenance
 
-- Source: `C:\Users\Bob\Desktop\APP2.0\Tool\SCRIPT\PSscriptAnalyzer\PSScriptAnalyzerSettingsFull.psd1`
+- Source: historical local `PSScriptAnalyzerSettingsFull.psd1` outside this repository (SHA-256 below identifies the original).
 - Original SHA-256: `CFE75D3F012C9050D2C75EE1BDAD3A87C2204A83F8498D5433DF9731D137DF98`
 - Validated dependency: PSScriptAnalyzer **1.25.0**, run with PowerShell 7.
 - The original source is unchanged. The bundled asset is the single runtime settings copy.

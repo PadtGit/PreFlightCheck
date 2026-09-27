@@ -13,8 +13,9 @@ Prepare a release on a branch, merge through a PR, then publish. Ask Bob which s
 
 1. Set `VERSION` to `X.Y.Z` (digits only; `tools/New-ReleaseArchive.ps1` rejects anything else).
 2. Update the `Version:` line near the top of `README.md`.
-3. Add `## X.Y.Z - YYYY-MM-DD` at the top of `CHANGELOG.md` with user-facing bullets in the
-   existing past-tense, behavior-first style. Summarize from `git log vPREV..HEAD`.
+3. Move the `Unreleased` entries into a new `## X.Y.Z - YYYY-MM-DD` section at the top of
+   `CHANGELOG.md`, with user-facing bullets in the existing past-tense, behavior-first style.
+   Summarize from `git log vPREV..HEAD`, then leave an empty `## Unreleased` section above it.
 4. Verify locally in PowerShell 7 (same versions as CI: Pester 6.2.0, PSScriptAnalyzer 1.25.0):
 
    ```powershell
@@ -34,5 +35,5 @@ git switch main; git pull --ff-only
 gh release create "v$((Get-Content VERSION -Raw).Trim())" --target main --title "PreFlightCheck vX.Y.Z" --notes-file <changelog-section>
 ```
 
-The tag must be `v` + `VERSION` or `release-archive.yml` fails. Confirm the workflow attached
+The tag must be `v` + `VERSION` or `.github/workflows/release-archive.yml` fails. Confirm the workflow attached
 `PreFlightCheck-X.Y.Z.zip` with `gh release view vX.Y.Z`.

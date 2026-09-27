@@ -19,6 +19,10 @@ Invoke-Pester -Configuration $config
 
 The dashboard runs under PowerShell 7; maintenance scripts and shared maintenance code must also parse under Windows PowerShell 5.1. Test system-changing paths with mocks or `-WhatIf`; do not run actual repairs, updates, or cleanup as a test.
 
+## Working with AI agents
+
+Read [AGENTS.md](AGENTS.md) for the runtime and safety rules. Codex uses the repository skills in [.agents/skills](.agents/skills/); Claude Code uses [.claude/skills](.claude/skills/). Edit the Claude Code copy first, then sync it with `Copy-Item .claude/skills/* .agents/skills/ -Recurse -Force`. [tests/AgentSkills.Tests.ps1](tests/AgentSkills.Tests.ps1) checks that the copies match. Claude Code also uses the [.claude/hooks/Block-LiveMaintenance.ps1](.claude/hooks/Block-LiveMaintenance.ps1) hook to block live maintenance commands without `-WhatIf`.
+
 ## Pull requests
 
 Describe the behavior changed, the tests run, and any result or exit-code impact. Keep `report.json`, `steps.csv`, `session.log`, guided-run order, and the cleanup health gate compatible. Generated reports and local machine details should not be committed.
