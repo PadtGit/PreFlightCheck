@@ -4,3 +4,8 @@ Reports/
 ValidationReport/
 dist/
 *.log
+
+# Local agent sandboxes and scratch checkouts
+.validation-deps/
+.worktrees/
+.claude/settings.local.json

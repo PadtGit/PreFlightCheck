@@ -1,0 +1,4 @@
+interface:
+  display_name: "PowerShell Security Review"
+  short_description: "Review Windows scripts and enforce a strict analyzer gate"
+  default_prompt: "Use $powershell-security-review to review this project's security and run the final analyzer check."
