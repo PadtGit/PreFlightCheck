@@ -50,10 +50,12 @@ Apply these according to the request. Each skill's `SKILL.md` has the details.
 
 Install locations:
 
-- **Codex:** `~/.codex/skills/<skill>/SKILL.md` (user-level).
+- **Codex:** `.agents/skills/<skill>/SKILL.md` in this repository (repo-scoped, loaded automatically).
 - **Claude Code:** `.claude/skills/<skill>/SKILL.md` in this repository (loaded automatically).
 
-When a skill changes, update both copies so Codex and Claude Code stay in sync.
+Edit `.claude/skills` first, then copy the change to `.agents/skills`:
+`Copy-Item .claude/skills/* .agents/skills/ -Recurse -Force`. `tests/AgentSkills.Tests.ps1`
+fails CI when the two copies differ. Older user-level copies in `~/.codex/skills` are not needed.
 
 Claude Code also loads `.claude/settings.json`, whose `Block-LiveMaintenance.ps1` hook refuses
 shell commands that would run a maintenance entry point without `-WhatIf`.
