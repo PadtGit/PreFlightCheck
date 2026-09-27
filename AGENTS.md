@@ -46,6 +46,7 @@ Apply these according to the request. Each skill's `SKILL.md` has the details.
 | `ps-project-features` | New functions, checks, dashboard tasks |
 | `ps-project-ux` | Console output and dashboard presentation |
 | `powershell-security-review` | Security review/hardening; ends with its strict analyzer check |
+| `pfc-release` | Cutting a release (user-invoked: `/pfc-release`) |
 
 Install locations:
 
@@ -53,3 +54,6 @@ Install locations:
 - **Claude Code:** `.claude/skills/<skill>/SKILL.md` in this repository (loaded automatically).
 
 When a skill changes, update both copies so Codex and Claude Code stay in sync.
+
+Claude Code also loads `.claude/settings.json`, whose `Block-LiveMaintenance.ps1` hook refuses
+shell commands that would run a maintenance entry point without `-WhatIf`.
