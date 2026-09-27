@@ -1,4 +1,20 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(cat:*)",
+      "Bash(which:*)",
+      "Bash(readlink:*)",
+      "Bash(pwsh -NoProfile -Command Invoke-Pester:*)",
+      "Bash(pwsh -NoProfile -File ./tools/Invoke-FullScriptAnalysis.ps1:*)",
+      "PowerShell(Invoke-Pester:*)",
+      "PowerShell(./tools/Invoke-FullScriptAnalysis.ps1:*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
