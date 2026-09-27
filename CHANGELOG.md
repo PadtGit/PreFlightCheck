@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show the saved stopping reason and nearby tool output directly in dashboard results, with expandable report findings and an exit-code legend on every task page that needs review or action; keep successful results concise.
+- Retry a contradictory CHKDSK RAW result through the supported read-only volume scan, and confirm transient Component Servicing restart markers before stopping a guided run.
 - Add shared agent instructions and matching repository skills for Codex and Claude Code, with a test that detects drift between the skill copies.
 - Add a Claude Code hook that blocks live maintenance entry points without `-WhatIf`.
 - Parse PowerShell 5.1 scripts with Windows PowerShell in CI and add monthly updates for pinned GitHub Actions.

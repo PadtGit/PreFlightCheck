@@ -284,7 +284,43 @@ try {
         }
         foreach ($volume in $healthVolumes) {
             if ($PSCmdlet.ShouldProcess("$($volume.DriveLetter):", 'Online file-system scan; defer fixes')) {
-                $diskCode = Invoke-LoggedProgram -Name "CHKDSK-$($volume.DriveLetter)" -FilePath "$env:SystemRoot\System32\chkdsk.exe" -Arguments @("$($volume.DriveLetter):",'/scan') -AcceptedCodes @(0,1,2)
+                $checkName = "CHKDSK-$($volume.DriveLetter)"
+                try {
+                    $diskCode = Invoke-LoggedProgram -Name $checkName -FilePath "$env:SystemRoot\System32\chkdsk.exe" -Arguments @("$($volume.DriveLetter):",'/scan') -AcceptedCodes @(0,1,2)
+                } catch {
+                    $checkLog = Join-Path -Path $runDirectory -ChildPath ($checkName + '.txt')
+                    $checkText = ''
+                    if (Test-Path -LiteralPath $checkLog) { $checkText = Get-Content -LiteralPath $checkLog -Raw }
+                    $rawMismatch = $volume.FileSystem -eq 'NTFS' -and
+                        $checkText -match 'The type of the file system is RAW\.' -and
+                        $checkText -match 'CHKDSK is not available for RAW drives\.'
+                    if (-not $rawMismatch) { throw }
+
+                    $fallbackName = "$checkName-Fallback"
+                    $fallbackLog = Join-Path -Path $runDirectory -ChildPath ($fallbackName + '.txt')
+                    Write-Information -MessageData "[RUNNING] ${fallbackName}: CHKDSK contradicted the mounted NTFS inventory; retrying with Repair-Volume -Scan..." -InformationAction Continue
+                    try {
+                        $fallbackOutput = @(Repair-Volume -DriveLetter ([char][string]$volume.DriveLetter) -Scan -Verbose 4>&1)
+                        $fallbackLines = @($fallbackOutput | ForEach-Object { [string]$_ })
+                        $fallbackLines | Out-File -LiteralPath $fallbackLog -Encoding utf8 -WhatIf:$false
+                        foreach ($line in $fallbackLines) {
+                            Write-Information -MessageData $line -InformationAction Continue
+                        }
+                        $scanResult = @($fallbackOutput | Where-Object { $_ -is [uint32] -or $_.GetType().IsEnum } | Select-Object -Last 1)
+                        if ($scanResult.Count -eq 0) { throw 'Repair-Volume returned no scan result.' }
+                        $scanStatus = [string]$scanResult[0]
+                        $scanCode = [uint32]$scanResult[0]
+                    } catch {
+                        throw "$checkName reported RAW for a mounted NTFS volume, and Repair-Volume -Scan also failed: $($_.Exception.Message) Review $checkLog and $fallbackLog"
+                    }
+                    if ($scanStatus -in @('NoErrorsFound','ScanNoErrorsFound')) {
+                        $diskCode = 0
+                        Add-Result -Step $fallbackName -Status Observed -Detail "Legacy CHKDSK reported RAW for a mounted NTFS volume. Repair-Volume -Scan found no file-system errors. Full output: $fallbackLog"
+                    } else {
+                        $diskCode = 3
+                        Add-Result -Step $fallbackName -Status Review -Detail "Legacy CHKDSK reported RAW for a mounted NTFS volume. Repair-Volume -Scan returned $scanStatus ($scanCode). Review $fallbackLog before cleanup."
+                    }
+                }
                 if ($diskCode -in @(1,2)) {
                     Add-Result -Step "CHKDSK-$($volume.DriveLetter)" -Status Review -Detail "CHKDSK returned $diskCode. Review the saved disk log before cleanup."
                 }
@@ -303,6 +339,29 @@ try {
         }
         Write-Information -MessageData '[RUNNING] RestartAfterHealth: Checking restart state after health checks...' -InformationAction Continue
         $report.RestartAfter = Get-PendingRestartState
+        $componentServicingOnly = $report.RestartAfter.Pending -and
+            $report.RestartAfter.Unknown.Count -eq 0 -and
+            @($report.RestartAfter.Reasons).Count -eq 1 -and
+            $report.RestartAfter.Reasons[0] -eq 'ComponentServicing'
+        if ($componentServicingOnly) {
+            Write-Information -MessageData '[RUNNING] RestartAfterHealth: Component servicing is still finishing; confirming the restart marker for up to 60 seconds...' -InformationAction Continue
+            # CBS can briefly expose RebootPending while it closes a successful
+            # scan-only transaction. Poll the marker itself; do not delay or
+            # relax any other restart reason.
+            for ($attempt = 1; $attempt -le 12; $attempt++) {
+                Start-Sleep -Seconds 5
+                $report.RestartAfter = Get-PendingRestartState
+                if (-not $report.RestartAfter.Pending -and $report.RestartAfter.Unknown.Count -eq 0) {
+                    Add-Result -Step RestartAfterHealth -Status Observed -Detail 'The temporary Component Servicing restart marker cleared after the health checks; no restart is currently pending.'
+                    break
+                }
+                $componentServicingOnly = $report.RestartAfter.Pending -and
+                    $report.RestartAfter.Unknown.Count -eq 0 -and
+                    @($report.RestartAfter.Reasons).Count -eq 1 -and
+                    $report.RestartAfter.Reasons[0] -eq 'ComponentServicing'
+                if (-not $componentServicingOnly) { break }
+            }
+        }
         if ($report.RestartAfter.Pending -or $report.RestartAfter.Unknown.Count -gt 0) {
             $report.RestartRequired = $true
             Add-Result -Step RestartAfterHealth -Status Review -Detail 'RESTART REQUIRED: Windows reports a pending or unknown restart state. Restart before cleanup or backup.'

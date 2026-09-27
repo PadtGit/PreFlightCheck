@@ -42,7 +42,7 @@ AfterAll {
 
 Describe 'Dashboard core module' {
     It 'exports the pure dashboard and worker presentation helpers' {
-        foreach ($name in @('Get-DashboardStateStyle','Get-GuiResultPresentation','Format-GuiTaskSummary','Get-LiveActivityState','Get-LiveActivityText')) {
+        foreach ($name in @('Get-DashboardStateStyle','Get-GuiResultPresentation','Get-GuiResultEvidence','Format-GuiTaskSummary','Format-GuiTaskDetail','Get-LiveActivityState','Get-LiveActivityText')) {
             (Get-Command -Name $name -Module Dashboard.Core -ErrorAction Stop).Name | Should -Be $name
         }
     }
@@ -76,14 +76,118 @@ Describe 'Dashboard result presentation' {
         $presentation = Get-GuiResultPresentation -ExitCode 2 -ReviewFindingCount 1
         $finding = [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Storage'; Detail = 'Disk needs attention'; Report = 'C:\fixture\report.json' }
 
-        $summary = Format-GuiTaskSummary -Presentation $presentation -Task 'PreBackupRun' -Finished ([datetime]'2026-09-23T10:11:12') -ReviewFindings @($finding) -RunDirectory 'C:\fixture\run' -ConsolePath 'C:\fixture\run\console.txt'
+        $evidence = [pscustomobject]@{ Reason = ''; ToolOutput = ''; Findings = @($finding) }
+        $parameters = @{ Presentation = $presentation; Task = 'PreBackupRun'; Finished = [datetime]'2026-09-23T10:11:12'; ExitCode = 2; Evidence = $evidence; RunDirectory = 'C:\fixture\run'; ConsolePath = 'C:\fixture\run\console.txt' }
+        $summary = Format-GuiTaskSummary @parameters
+        $details = Format-GuiTaskDetail @parameters
 
         $summary | Should -Match '^REVIEW — 1 finding needs attention'
-        $summary | Should -Match '01-SystemReview / Storage: Disk needs attention'
-        $summary | Should -Match 'Report: C:\\fixture\\report.json'
+        $summary | Should -Match '1 finding in the saved reports'
+        $details | Should -Match '01-SystemReview / Storage: Disk needs attention'
+        $details | Should -Match 'Report: C:\\fixture\\report.json'
         $summary | Should -Match 'Detailed output: C:\\fixture\\run\\console.txt'
         $summary | Should -Match 'Results: C:\\fixture\\run'
         ($summary -split '\r?\n').Count | Should -BeLessOrEqual 10
+    }
+
+    It 'identifies the guided stop separately from earlier review findings' {
+        $guided = [pscustomobject]@{
+            Message = '02-WindowsHealth failed. Routine: CHKDSK-C returned 3. Review C:\fixture\CHKDSK-C.txt Report: C:\fixture\report.json'
+            ReviewFindings = @([pscustomobject]@{ Step = '01-SystemReview'; Check = 'Space'; Detail = 'Recovery volume has 115 MB free'; Report = 'C:\fixture\review.json' })
+        }
+        $consolePath = Join-Path $TestDrive 'guided-console.txt'
+        @('[RUNNING] CHKDSK-C: In progress...', 'The type of the file system is RAW.', 'CHKDSK is not available for RAW drives.', '[Failed] Routine: CHKDSK-C returned 3.') | Set-Content -LiteralPath $consolePath
+
+        $evidence = Get-GuiResultEvidence -Task PreBackupRun -ExitCode 1 -GuidedResult $guided -ConsolePath $consolePath
+        $evidence.Reason | Should -Match '02-WindowsHealth failed.*CHKDSK-C returned 3'
+        $evidence.Reason | Should -Not -Match 'C:\\fixture'
+        $evidence.ToolOutput | Should -Match 'CHKDSK is not available for RAW drives'
+        $evidence.Findings.Count | Should -Be 1
+        $evidence.Findings[0].Check | Should -Be 'Space'
+    }
+
+    It 'uses a standalone report failure as the reason and retains review findings for details' {
+        $report = [pscustomobject]@{ Results = @(
+            [pscustomobject]@{ Step = 'Space'; Status = 'Review'; Detail = 'Recovery volume needs review' },
+            [pscustomobject]@{ Step = 'Routine'; Status = 'Failed'; Detail = 'CHKDSK-C returned 3' }
+        ) }
+        $evidence = Get-GuiResultEvidence -Task HealthCheck -ExitCode 1 -Report $report -ReportPath 'C:\fixture\report.json'
+        $evidence.Reason | Should -Be 'Routine: CHKDSK-C returned 3'
+        $evidence.Findings.Count | Should -Be 1
+        $evidence.Findings[0].Check | Should -Be 'Space'
+        $details = Format-GuiTaskDetail -Presentation (Get-GuiResultPresentation -ExitCode 1) -Task HealthCheck -Finished ([datetime]'2026-09-27T03:09:03') -ExitCode 1 -Evidence $evidence -RunDirectory 'C:\fixture\run' -ConsolePath 'C:\fixture\console.txt'
+        $details | Should -Match 'Report: C:\\fixture\\report.json'
+    }
+
+    It 'uses the script error when a standalone task cannot save a report' {
+        $consolePath = Join-Path $TestDrive 'dell-console.txt'
+        @('Model: Unknown', 'Weekly-DellReview.ps1 : This helper is for the Dell G5 5590. Select your actual model on Dell Support.', '    + CategoryInfo : OperationStopped') | Set-Content -LiteralPath $consolePath
+        $evidence = Get-GuiResultEvidence -Task DellReview -ExitCode 1 -ConsolePath $consolePath
+        $evidence.Reason | Should -Match 'This helper is for the Dell G5 5590'
+    }
+
+    It 'points to the failure report even when it has no review findings' {
+        $report = [pscustomobject]@{ Results = @([pscustomobject]@{ Step = 'Routine'; Status = 'Failed'; Detail = 'CHKDSK-C returned 3' }) }
+        $evidence = Get-GuiResultEvidence -Task HealthCheck -ExitCode 1 -Report $report -ReportPath 'C:\fixture\report.json'
+        $details = Format-GuiTaskDetail -Presentation (Get-GuiResultPresentation -ExitCode 1) -Task HealthCheck -Finished ([datetime]'2026-09-27T03:09:03') -ExitCode 1 -Evidence $evidence -RunDirectory 'C:\fixture\run' -ConsolePath 'C:\fixture\console.txt'
+        $details | Should -Match 'Report: C:\\fixture\\report.json'
+    }
+
+    It 'shows the stop reason up front and expands into tool output, findings, and the exit-code legend' {
+        $presentation = Get-GuiResultPresentation -ExitCode 1
+        $evidence = [pscustomobject]@{
+            Reason = '02-WindowsHealth failed. Routine: CHKDSK-C returned 3.'
+            ToolOutput = 'CHKDSK is not available for RAW drives.'
+            Findings = @([pscustomobject]@{ Step = '01-SystemReview'; Check = 'Space'; Detail = 'Recovery volume needs review'; Report = 'C:\fixture\report.json' })
+        }
+        $parameters = @{ Presentation = $presentation; Task = 'PreBackupRun'; Finished = [datetime]'2026-09-27T03:09:03'; ExitCode = 1; Evidence = $evidence; RunDirectory = 'C:\fixture\run'; ConsolePath = 'C:\fixture\run\console.txt' }
+        $summary = Format-GuiTaskSummary @parameters
+        $details = Format-GuiTaskDetail @parameters
+
+        $summary | Should -Match 'Reason: 02-WindowsHealth failed.*CHKDSK-C returned 3'
+        $summary | Should -Match 'Tool output: CHKDSK is not available for RAW drives'
+        $summary | Should -Not -Match 'Recovery volume needs review'
+        $details | Should -Match 'CHKDSK is not available for RAW drives'
+        $details | Should -Match '01-SystemReview / Space: Recovery volume needs review'
+        $details | Should -Match '1 = stopped or failed'
+        $details | Should -Match 'Report: C:\\fixture\\report.json'
+    }
+
+    It 'keeps a successful task short without a failure legend' {
+        $presentation = Get-GuiResultPresentation -ExitCode 0
+        $summary = Format-GuiTaskSummary -Presentation $presentation -Task Audit -Finished ([datetime]'2026-09-27T03:09:03') -ExitCode 0 -RunDirectory 'C:\fixture\run' -ConsolePath 'C:\fixture\run\console.txt'
+        $summary | Should -Match '^SUCCESS'
+        $summary | Should -Not -Match 'Reason:|Exit code legend|Findings:'
+    }
+}
+
+Describe 'Interactive result details' {
+    BeforeAll {
+        $dashboardAst = [System.Management.Automation.Language.Parser]::ParseFile($dashboardPath, [ref]$null, [ref]$null)
+        $click = $dashboardAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and
+                $node.Expression.Extent.Text -eq '$ShowDetails' -and $node.Member.Value -eq 'Add_Click'
+        }, $true)
+        $clickHandler = $click.Arguments[0].ScriptBlock.GetScriptBlock()
+    }
+
+    It 'switches between the saved summary and detailed explanation without running a task' {
+        $script:runDirectory = $TestDrive
+        $script:detailsVisible = $false
+        'Short stop reason' | Set-Content -LiteralPath (Join-Path $TestDrive 'summary.txt')
+        'Full report findings and exit code legend' | Set-Content -LiteralPath (Join-Path $TestDrive 'details.txt')
+        $Console = [pscustomobject]@{ Text = 'Short stop reason' }
+        $Console | Add-Member -MemberType ScriptMethod -Name ScrollToHome -Value { }
+        $ShowDetails = [pscustomobject]@{ Content = 'Show details' }
+
+        & $clickHandler
+        $Console.Text | Should -Match 'Full report findings and exit code legend'
+        $ShowDetails.Content | Should -Be 'Show summary'
+
+        & $clickHandler
+        $Console.Text | Should -Match 'Short stop reason'
+        $ShowDetails.Content | Should -Be 'Show details'
     }
 }
 

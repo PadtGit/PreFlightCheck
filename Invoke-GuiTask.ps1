@@ -132,6 +132,8 @@ $restartRequired = $false
 $repairRecommended = $false
 $healthReady = $false
 $reviewFindings = @()
+$machineResult = $null
+$guidedResult = $null
 $machineReport = Get-ChildItem -LiteralPath $runDirectory -Filter report.json -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($machineReport) {
     $machineResult = Get-Content -LiteralPath $machineReport.FullName -Raw | ConvertFrom-Json
@@ -149,8 +151,13 @@ if (Test-Path -LiteralPath $guidedResultPath) {
 }
 $finishedAt = [datetime]::Now
 $presentation = Get-GuiResultPresentation -ExitCode $exitCode -RestartRequired $restartRequired -RepairRecommended $repairRecommended -ReviewFindingCount $reviewFindings.Count
-$summary = Format-GuiTaskSummary -Presentation $presentation -Task $request.Task -Finished $finishedAt -ReviewFindings $reviewFindings -RunDirectory $runDirectory -ConsolePath $consolePath
+$reportPath = if ($machineReport) { $machineReport.FullName } else { '' }
+$evidence = Get-GuiResultEvidence -Task $request.Task -ExitCode $exitCode -Report $machineResult -ReportPath $reportPath -GuidedResult $guidedResult -ConsolePath $consolePath
+$formatArgs = @{ Presentation = $presentation; Task = $request.Task; Finished = $finishedAt; ExitCode = $exitCode; Evidence = $evidence; RunDirectory = $runDirectory; ConsolePath = $consolePath }
+$summary = Format-GuiTaskSummary @formatArgs
+$details = Format-GuiTaskDetail @formatArgs
 $summary | Set-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'summary.txt') -Encoding utf8
+$details | Set-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'details.txt') -Encoding utf8
 $finished = [ordered]@{ ExitCode = $exitCode; Task = $request.Task; Finished = $finishedAt.ToString('o'); DisplayState = $presentation.State; StatusLabel = $presentation.StatusLabel; RestartRequired = $restartRequired; RepairRecommended = $repairRecommended; HealthReady = $healthReady; ReviewRequired = ($exitCode -eq 2 -or $reviewFindings.Count -gt 0); ReviewFindings = $reviewFindings; Console = $consolePath; Results = $runDirectory }
 $finished | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'finished.json') -Encoding utf8
 $sessionDirectory = $requestFile.Directory.Parent.FullName

@@ -44,6 +44,7 @@ $script:lastPage = 'Runbook'
 $script:activeTask = $null
 $script:taskStartedAt = $null
 $script:liveActivityState = $null
+$script:detailsVisible = $false
 [xml]$layout = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="830" MinWidth="940" MinHeight="700" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
 <Window.Resources>
@@ -67,11 +68,11 @@ $script:liveActivityState = $null
 <WrapPanel Grid.Row="2"><Button x:Name="Preview" Content="Run review" Background="#14756C"/><Button x:Name="Apply" Content="Apply changes…" Background="#964B38"/></WrapPanel>
 </Grid></Grid>
 <Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="LIVE ACTIVITY / RESULT" Foreground="#74DCC7" FontWeight="Bold" VerticalAlignment="Center"/><Border x:Name="StatusBorder" Grid.Column="1" HorizontalAlignment="Right" Background="#172534" BorderBrush="#4A6178" BorderThickness="1" CornerRadius="3" Padding="9,4"><TextBlock x:Name="Status" Text="IDLE — Ready" Foreground="#ADC0D2" FontWeight="SemiBold"/></Border></Grid><Grid Grid.Row="1" Margin="0,0,0,8"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="CurrentOperation" Text="Current operation: Waiting to start" Foreground="#E9F1F7" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ElapsedTask" Grid.Column="1" Text="Elapsed: 00:00:00" Foreground="#ADC0D2" Margin="16,0,0,0" TextWrapping="NoWrap"/></Grid><Grid Grid.Row="1" Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ProgressBar x:Name="ActivityProgress" Height="7" Minimum="0" Maximum="100" IsIndeterminate="False" Value="0" Foreground="#74DCC7" Background="#172534" BorderBrush="#2D5B68"/><TextBlock x:Name="ActivityProgressText" Grid.Column="1" Text="Ready" Foreground="#ADC0D2" HorizontalAlignment="Right" MinWidth="70" Margin="10,-5,0,0" TextWrapping="NoWrap"/></Grid></Grid><TextBox x:Name="Console" Grid.Row="2" IsReadOnly="True" Background="#080D14" Foreground="#D7E7E1" FontFamily="Consolas" FontSize="13" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Choose a task. Live activity and the final result will appear here."/></Grid>
-<DockPanel Grid.Row="3" Margin="0,12,0,0"><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button x:Name="OpenResults" Content="Open result summary" IsEnabled="False"/><Button x:Name="OpenResultFolder" Content="Open result folder" IsEnabled="False"/><Button x:Name="OpenGuide" Content="Guide"/></StackPanel><TextBlock Text="Detailed output is saved automatically." Foreground="#ADC0D2" VerticalAlignment="Center"/></DockPanel>
+<DockPanel Grid.Row="3" Margin="0,12,0,0"><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button x:Name="ShowDetails" Content="Show details" IsEnabled="False"/><Button x:Name="OpenResults" Content="Open result summary" IsEnabled="False"/><Button x:Name="OpenResultFolder" Content="Open result folder" IsEnabled="False"/><Button x:Name="OpenGuide" Content="Guide"/></StackPanel><TextBlock Text="Detailed output is saved automatically." Foreground="#ADC0D2" VerticalAlignment="Center"/></DockPanel>
 </Grid></Window>
 '@
 $script:window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
-foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','OpenResults','OpenResultFolder','OpenGuide','StatusBorder','Status','CurrentOperation','ElapsedTask','ActivityProgress','ActivityProgressText')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
+foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','ShowDetails','OpenResults','OpenResultFolder','OpenGuide','StatusBorder','Status','CurrentOperation','ElapsedTask','ActivityProgress','ActivityProgressText')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
@@ -269,6 +270,7 @@ function Start-DashboardTask {
         $script:taskStartedAt = [datetime]::Now
         $script:liveActivityState = $null
         $Tasks.IsEnabled = $false; $Options.IsEnabled = $false; $Preview.IsEnabled = $false; $Apply.IsEnabled = $false
+        $ShowDetails.IsEnabled = $false; $ShowDetails.Content = 'Show details'; $script:detailsVisible = $false
         $OpenResults.IsEnabled = $false; $OpenResultFolder.IsEnabled = $false
         $currentStepPath = Join-Path -Path $runDirectory -ChildPath 'GuidedReport\current-step.txt'
         $script:liveActivityState = Get-LiveActivityState -Task $script:activeTask -ConsolePath (Join-Path -Path $runDirectory -ChildPath 'console.txt') -ActivityPath $currentStepPath -StartedAt $script:taskStartedAt
@@ -287,6 +289,16 @@ $RunbookButton.Add_Click({ Show-Page Runbook }); $AuditButton.Add_Click({ Show-P
 $Preview.Add_Click({ Start-DashboardTask }); $Apply.Add_Click({ Start-DashboardTask -ApplyChanges })
 $InstallUpgradeButton.Add_Click({ Start-DashboardTask -RequestedAction Install }); $UninstallButton.Add_Click({ Start-DashboardTask -RequestedAction Uninstall }); $UpgradeAllButton.Add_Click({ Start-DashboardTask -RequestedAction UpgradeAll }); $ShowInstalledButton.Add_Click({ Start-DashboardTask -RequestedAction Installed }); $ClearSelectionButton.Add_Click({ $ValueInput.Text = '' })
 $ValueInput.Add_TextChanged({ if ($script:lastPage -eq 'Applications') { $count = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }); $SelectionCount.Text = "Selected Apps: $($count.Count)" } })
+$ShowDetails.Add_Click({
+    $fileName = if ($script:detailsVisible) { 'summary.txt' } else { 'details.txt' }
+    $displayPath = Join-Path -Path $script:runDirectory -ChildPath $fileName
+    if (Test-Path -LiteralPath $displayPath) {
+        $Console.Text = Get-Content -LiteralPath $displayPath -Raw
+        $Console.ScrollToHome()
+        $script:detailsVisible = -not $script:detailsVisible
+        $ShowDetails.Content = if ($script:detailsVisible) { 'Show summary' } else { 'Show details' }
+    }
+})
 $OpenResults.Add_Click({
     $summaryPath = if ($script:runDirectory) { Join-Path -Path $script:runDirectory -ChildPath 'summary.txt' } else { $null }
     if ($summaryPath -and (Test-Path -LiteralPath $summaryPath)) { Start-Process -FilePath $summaryPath }
@@ -329,6 +341,9 @@ $timer.Add_Tick({
             $CurrentOperation.ToolTip = $CurrentOperation.Text.Substring('Current operation: '.Length)
             $ActivityProgressText.Text = if ($hasSummary) { 'Result saved' } else { 'Finished' }
             $Console.Text = if ($hasSummary) { Get-Content -LiteralPath $summaryPath -Raw } else { "ACTION NEEDED — No summary was saved.`r`nOpen the result folder for console.txt and report files." }
+            $script:detailsVisible = $false
+            $ShowDetails.Content = 'Show details'
+            $ShowDetails.IsEnabled = $false
             $Console.ScrollToHome()
             $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
             if (Test-Path -LiteralPath $finishedPath) {
@@ -339,6 +354,8 @@ $timer.Add_Tick({
                 }
                 $displayState = if ($finished.PSObject.Properties['DisplayState']) { [string]$finished.DisplayState } elseif ($finished.RestartRequired) { 'Restart' } elseif ($finished.RepairRecommended) { 'Repair' } elseif ($finished.ExitCode -eq 0) { 'Success' } elseif ($finished.ExitCode -eq 2) { 'Review' } else { 'ActionNeeded' }
                 $statusLabel = if ($finished.PSObject.Properties['StatusLabel']) { [string]$finished.StatusLabel } else { $null }
+                $detailsPath = Join-Path -Path $runDirectory -ChildPath 'details.txt'
+                $ShowDetails.IsEnabled = $finished.ExitCode -ne 0 -and (Test-Path -LiteralPath $detailsPath)
                 if ($hasSummary) { Set-DashboardStatus -State $displayState -Label $statusLabel }
                 else { Set-DashboardStatus -State ActionNeeded -Label 'ACTION NEEDED — Result summary missing' }
                 $script:taskStatus = $Status.Text
@@ -403,7 +420,7 @@ if ($UiTestOutput) {
         $ActivityProgress.Visibility = 'Collapsed'
         $ActivityProgressText.Text = 'Result saved'
         $Console.Text = @($style.Label,'Task: PreBackupRun','Finished: 2026-09-23 10:11:12','Next: Review the saved result before continuing.','Detailed output: C:\GuiRuns\fixture\console.txt','Results: C:\GuiRuns\fixture') -join [Environment]::NewLine
-        $OpenResults.IsEnabled = $true; $OpenResultFolder.IsEnabled = $true
+        $OpenResults.IsEnabled = $true; $OpenResultFolder.IsEnabled = $true; $ShowDetails.IsEnabled = $UiState -ne 'Success'
     }
     $surface = $window.Content; $surface.Measure([Windows.Size]::new(1080,790)); $surface.Arrange([Windows.Rect]::new(0,0,1080,790)); $surface.UpdateLayout()
     $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1080,790,96,96,[Windows.Media.PixelFormats]::Pbgra32); $bitmap.Render($surface)
