@@ -33,6 +33,8 @@ BeforeAll {
         . ([scriptblock]::Create($node.Extent.Text))
     }
     Import-Module (Join-Path $repositoryRoot 'Maintenance.Core.psm1') -Force
+    Import-Module Storage -ErrorAction Stop
+    $script:cleanRepairStatus = [Microsoft.PowerShell.Cmdletization.GeneratedTypes.Volume.RepairStatus]::ScanNoErrorsFound
 
     function Invoke-ModeFixture {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Parameters are consumed by the dot-sourced production mode branch.')]
@@ -54,13 +56,33 @@ Describe 'Health gate behavior' {
             VolumesBefore = @([pscustomobject]@{ DriveType = 'Fixed'; DriveLetter = 'C'; FileSystem = 'NTFS' })
         }
         $script:diskCode = 0
+        $script:rawChkdskDrive = $null
         $script:repairCode = 0
         $script:restartPending = $false
+        $script:restartSequence = @()
+        $script:restartSequenceIndex = 0
         $script:nativeCalls = [System.Collections.Generic.List[string]]::new()
-        Mock Get-PendingRestartState { [pscustomobject]@{ Pending = $script:restartPending; Unknown = @() } }
+        Mock Get-PendingRestartState {
+            if ($script:restartSequenceIndex -lt $script:restartSequence.Count) {
+                $state = $script:restartSequence[$script:restartSequenceIndex]
+                $script:restartSequenceIndex++
+                return $state
+            }
+            $reasons = @()
+            if ($script:restartPending) { $reasons = @('FixtureRestart') }
+            [pscustomobject]@{ Pending = $script:restartPending; Reasons = $reasons; Unknown = @() }
+        }
+        Mock Start-Sleep {}
         Mock Invoke-LoggedProgram {
             param($Name, $AcceptedCodes = @(0))
             $script:nativeCalls.Add($Name)
+            if ($Name -eq "CHKDSK-$script:rawChkdskDrive") {
+                Set-Content -LiteralPath (Join-Path $script:runDirectory ($Name + '.txt')) -Value @(
+                    'The type of the file system is RAW.'
+                    'CHKDSK is not available for RAW drives.'
+                )
+                throw "$Name returned 3. Review the saved log"
+            }
             $code = 0
             if ($Name -like '*CHKDSK*') { $code = $script:diskCode }
             if ($Name -eq 'SystemRepair-DISM') { $code = $script:repairCode }
@@ -69,6 +91,7 @@ Describe 'Health gate behavior' {
             if ($Name -eq 'SFC') { Set-Content (Join-Path $script:runDirectory 'SFC.txt') 'Windows Resource Protection did not find any integrity violations.' }
             return $code
         }
+        Mock Repair-Volume { $script:cleanRepairStatus }
     }
 
     It 'keeps cleanup locked after a successful SystemRepair and asks for a normal health check' {
@@ -160,6 +183,31 @@ Describe 'Health gate behavior' {
         $report.HealthReady | Should -BeFalse
         @($report.Results | Where-Object { $_.Step -eq 'CHKDSK-C' -and $_.Status -eq 'Review' }).Count | Should -Be 1
     }
+
+    It 'uses the supported volume scan when CHKDSK misidentifies a mounted NTFS volume as RAW' {
+        $script:rawChkdskDrive = 'C'
+
+        { Invoke-ModeFixture -Mode Health } | Should -Not -Throw
+
+        $report.HealthReady | Should -BeTrue
+        $fallback = @($report.Results | Where-Object { $_.Step -eq 'CHKDSK-C-Fallback' })
+        $fallback.Count | Should -Be 1
+        $fallback[0].Status | Should -Be 'Observed'
+        $fallback[0].Detail | Should -Match 'Repair-Volume -Scan.*no file-system errors'
+    }
+
+    It 'waits for a transient component-servicing restart marker to clear before locking cleanup' {
+        $script:restartSequence = @(
+            [pscustomobject]@{ Pending = $true; Reasons = @('ComponentServicing'); Unknown = @() }
+            [pscustomobject]@{ Pending = $false; Reasons = @(); Unknown = @() }
+        )
+
+        Invoke-ModeFixture -Mode Health
+
+        $report.RestartRequired | Should -BeFalse
+        $report.HealthReady | Should -BeTrue
+        @($report.Results | Where-Object { $_.Step -eq 'RestartAfterHealth' -and $_.Status -eq 'Observed' }).Count | Should -Be 1
+    }
 }
 
 Describe 'Applications preview behavior' {
@@ -236,7 +284,7 @@ Describe 'Dashboard health eligibility from completed tasks' {
         $Status = [pscustomobject]@{ Text = '' }
         foreach ($name in @('CurrentOperation','ElapsedTask','ActivityProgressText')) { Set-Variable -Name $name -Value ([pscustomobject]@{ Text = ''; ToolTip = '' }) }
         $ActivityProgress = [pscustomobject]@{ IsIndeterminate = $true; Value = 25; Visibility = 'Visible' }
-        foreach ($name in @('Tasks','Options','Preview','Apply','OpenResults','OpenResultFolder')) { Set-Variable -Name $name -Value ([pscustomobject]@{ IsEnabled = $false }) }
+        foreach ($name in @('Tasks','Options','Preview','Apply','ShowDetails','OpenResults','OpenResultFolder')) { Set-Variable -Name $name -Value ([pscustomobject]@{ IsEnabled = $false; Content = '' }) }
         Set-Content (Join-Path $runDirectory 'summary.txt') 'Fixture summary'
     }
 
@@ -283,7 +331,7 @@ Describe 'Cleanup action availability' {
         $script:taskStartedAt = $null
         $script:liveActivityState = $null
         $ActivityProgress = [pscustomobject]@{ IsIndeterminate = $true; Value = 25; Visibility = 'Visible' }
-        foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status','OpenResults','OpenResultFolder','CurrentOperation','ElapsedTask','ActivityProgressText')) {
+        foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status','ShowDetails','OpenResults','OpenResultFolder','CurrentOperation','ElapsedTask','ActivityProgressText')) {
             Set-Variable -Name $name -Value ([pscustomobject]@{ Visibility = ''; Text = ''; ToolTip = ''; Content = ''; IsChecked = $false; IsEnabled = $true })
         }
         $Status.Text = 'Ready'

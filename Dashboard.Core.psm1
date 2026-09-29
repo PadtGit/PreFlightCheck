@@ -75,6 +75,73 @@ function Get-GuiResultPresentation {
     }
 }
 
+function Get-GuiResultEvidence {
+    <#
+    .SYNOPSIS
+        Separates a task's stopping reason from report review findings.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Task,
+        [Parameter(Mandatory)][int]$ExitCode,
+        [psobject]$Report,
+        [string]$ReportPath,
+        [psobject]$GuidedResult,
+        [string]$ConsolePath
+    )
+
+    $reason = ''
+    $rawReason = ''
+    $findings = @()
+    if ($Task -eq 'PreBackupRun' -and $GuidedResult) {
+        if ($ExitCode -ne 0) {
+            $rawReason = [string]$GuidedResult.Message
+            $reason = $rawReason
+            $reportMarker = $reason.LastIndexOf(' Report: ', [StringComparison]::OrdinalIgnoreCase)
+            $reviewMarker = $reason.LastIndexOf(' Review ', [StringComparison]::OrdinalIgnoreCase)
+            if ($reportMarker -gt $reviewMarker -and $reviewMarker -ge 0 -and $reason.Substring($reviewMarker + 8) -match '^[A-Za-z]:\\') {
+                $reason = $reason.Substring(0, $reviewMarker).TrimEnd()
+            }
+        }
+        $findings = @($GuidedResult.ReviewFindings | Where-Object { $null -ne $_ })
+    } elseif ($Report) {
+        $failed = @($Report.Results | Where-Object { $_.Status -eq 'Failed' })
+        $review = @($Report.Results | Where-Object { $_.Status -eq 'Review' })
+        if ($failed.Count -gt 0) { $reason = (@($failed | ForEach-Object { "$($_.Step): $($_.Detail)" }) -join '; ') }
+        elseif ($ExitCode -eq 2 -and $review.Count -gt 0) { $reason = "$($review[0].Step): $($review[0].Detail)" }
+        $findings = @($review | ForEach-Object {
+            [pscustomobject]@{ Step = $Task; Check = [string]$_.Step; Detail = [string]$_.Detail; Report = $ReportPath; Status = [string]$_.Status }
+        })
+    }
+    $toolOutput = ''
+    if ($ExitCode -ne 0 -and $ConsolePath -and (Test-Path -LiteralPath $ConsolePath)) {
+        $lines = @(Get-Content -LiteralPath $ConsolePath -Tail 200 -ErrorAction Stop)
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            foreach ($line in $lines) {
+                if ($line -match '\.ps1\s*:\s*(?<Message>.+)$') { $reason = $Matches.Message.Trim() }
+                elseif ($line -match '^\s*\[Failed\]\s*(?<Message>.+)$') { $reason = $Matches.Message.Trim() }
+            }
+        }
+        $failureIndex = -1
+        for ($index = $lines.Count - 1; $index -ge 0; $index--) {
+            if ($lines[$index] -match '^\s*\[Failed\]') { $failureIndex = $index; break }
+        }
+        if ($failureIndex -ge 0) {
+            $context = [System.Collections.Generic.List[string]]::new()
+            for ($index = $failureIndex - 1; $index -ge 0 -and $context.Count -lt 4; $index--) {
+                $line = ([string]$lines[$index]).Trim()
+                if ($line -match '^\s*\[(RUNNING|Observed|Completed|Review|Failed)\]' -or $line -match '^\[\d{4}-\d{2}-\d{2} ') { break }
+                if ($line) { $context.Insert(0, $line) }
+            }
+            $toolOutput = $context -join [Environment]::NewLine
+        }
+    }
+    if ($ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($reason)) {
+        $reason = 'No specific reason was recorded in the saved report. Check the detailed output.'
+    }
+    [pscustomobject]@{ Reason = $reason; RawReason = $rawReason; Findings = $findings; ToolOutput = $toolOutput; ReportPath = $ReportPath }
+}
+
 function Format-GuiTaskSummary {
     <#
     .SYNOPSIS
@@ -85,7 +152,8 @@ function Format-GuiTaskSummary {
         [Parameter(Mandatory)][psobject]$Presentation,
         [Parameter(Mandatory)][string]$Task,
         [Parameter(Mandatory)][datetime]$Finished,
-        [object[]]$ReviewFindings = @(),
+        [Parameter(Mandatory)][int]$ExitCode,
+        [psobject]$Evidence,
         [Parameter(Mandatory)][string]$RunDirectory,
         [Parameter(Mandatory)][string]$ConsolePath
     )
@@ -94,17 +162,65 @@ function Format-GuiTaskSummary {
     $summaryLines.Add([string]$Presentation.StatusLabel)
     $summaryLines.Add("Task: $Task")
     $summaryLines.Add("Finished: $($Finished.ToString('yyyy-MM-dd HH:mm:ss'))")
+    $meaning = if ($ExitCode -eq 0) { 'completed' } elseif ($ExitCode -eq 2) { 'review needed' } else { 'stopped or failed' }
+    $summaryLines.Add("Exit code: $ExitCode ($meaning)")
+    if ($ExitCode -ne 0 -and $Evidence -and $Evidence.Reason) { $summaryLines.Add("Reason: $($Evidence.Reason)") }
+    if ($ExitCode -ne 0 -and $Evidence -and $Evidence.ToolOutput) { $summaryLines.Add("Tool output: $($Evidence.ToolOutput)") }
+    if ($Task -eq 'PreBackupRun' -and $ExitCode -eq 1) { $summaryLines.Add('The guided sequence stopped here; later steps were not run.') }
     $summaryLines.Add("Next: $($Presentation.NextAction)")
-    if ($ReviewFindings.Count -gt 0) {
-        $summaryLines.Add('Findings:')
-        foreach ($finding in $ReviewFindings) {
-            $summaryLines.Add("- $($finding.Step) / $($finding.Check): $($finding.Detail)")
-            $summaryLines.Add("  Report: $($finding.Report)")
-        }
+    if ($ExitCode -ne 0 -and $Evidence -and @($Evidence.Findings).Count -gt 0) {
+        $count = @($Evidence.Findings).Count
+        $label = if ($count -eq 1) { 'finding' } else { 'findings' }
+        $summaryLines.Add("$count $label in the saved reports. Select Show details to inspect them.")
     }
     $summaryLines.Add("Detailed output: $ConsolePath")
     $summaryLines.Add("Results: $RunDirectory")
     return $summaryLines -join [Environment]::NewLine
+}
+
+function Format-GuiTaskDetail {
+    <#
+    .SYNOPSIS
+        Formats expandable evidence for a task that needs review or action.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][psobject]$Presentation,
+        [Parameter(Mandatory)][string]$Task,
+        [Parameter(Mandatory)][datetime]$Finished,
+        [Parameter(Mandatory)][int]$ExitCode,
+        [psobject]$Evidence,
+        [Parameter(Mandatory)][string]$RunDirectory,
+        [Parameter(Mandatory)][string]$ConsolePath
+    )
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add((Format-GuiTaskSummary -Presentation $Presentation -Task $Task -Finished $Finished -ExitCode $ExitCode -Evidence $Evidence -RunDirectory $RunDirectory -ConsolePath $ConsolePath))
+    if ($ExitCode -eq 0) { return $lines -join [Environment]::NewLine }
+    if ($Evidence -and $Evidence.ToolOutput) {
+        $lines.Add('')
+        $lines.Add('Recent tool output near the failure:')
+        $lines.Add([string]$Evidence.ToolOutput)
+    }
+    if ($Evidence -and $Evidence.PSObject.Properties['RawReason'] -and $Evidence.RawReason -and $Evidence.RawReason -ne $Evidence.Reason) {
+        $lines.Add('')
+        $lines.Add("Recorded stop: $($Evidence.RawReason)")
+    }
+    if ($Evidence -and $Evidence.PSObject.Properties['ReportPath'] -and $Evidence.ReportPath) {
+        $lines.Add('')
+        $lines.Add("Report: $($Evidence.ReportPath)")
+    }
+    if ($Evidence -and @($Evidence.Findings).Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('Report findings (separate from the stopping reason):')
+        foreach ($finding in $Evidence.Findings) {
+            $lines.Add("- $($finding.Step) / $($finding.Check): $($finding.Detail)")
+            if ($finding.Report -and (-not $Evidence.PSObject.Properties['ReportPath'] -or $finding.Report -ne $Evidence.ReportPath)) { $lines.Add("  Report: $($finding.Report)") }
+        }
+    }
+    $lines.Add('')
+    $lines.Add('Exit code legend: 0 = completed; 1 = stopped or failed; 2 = completed with review findings.')
+    return $lines -join [Environment]::NewLine
 }
 
 function Get-LiveActivityState {
@@ -278,4 +394,4 @@ function Get-LiveActivityText {
     ) -join [Environment]::NewLine
 }
 
-Export-ModuleMember -Function Get-DashboardStateStyle, Get-GuiResultPresentation, Format-GuiTaskSummary, Get-LiveActivityState, Get-LiveActivityText
+Export-ModuleMember -Function Get-DashboardStateStyle, Get-GuiResultPresentation, Get-GuiResultEvidence, Format-GuiTaskSummary, Format-GuiTaskDetail, Get-LiveActivityState, Get-LiveActivityText
