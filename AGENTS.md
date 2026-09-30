@@ -59,3 +59,6 @@ fails CI when the two copies differ.
 
 Claude Code also loads `.claude/settings.json`, whose `.claude/hooks/Block-LiveMaintenance.ps1` hook refuses
 shell commands that would run a maintenance entry point without `-WhatIf`.
+`.claude/hooks/Test-EditedScript.ps1` runs after every edit to a `.ps1`/`.psm1`/`.psd1` file (PS5.1 parse + PSScriptAnalyzer,
+release-blocking findings only) and exits 2 on problems; fix them before continuing. It skips `PSUseCompatibleCommands`/`Types`,
+which only `tools/Invoke-FullScriptAnalysis.ps1` enforces. Keep its `$advisoryRules` in sync with that script.
