@@ -124,6 +124,8 @@ The individual command-line routines remain available for attended troubleshooti
 
 The combined `session.log` lives at the dashboard session root; `report.json`, `steps.csv`, and native-tool logs live under each task's `Report/<timestamp>/` folder (or its `GuidedReport/` step folders for a guided run). The GUI shows a dedicated warning when Windows needs repair or restart. Cleanup displays **CLEANUP LOCKED** and disables its apply button until a completed normal Health Check reports ready with no review, failure, or restart conditions; cleanup preview remains available. Health readiness requires at least one eligible fixed NTFS volume with a drive letter to be checked. A `-WhatIf` run and either repair action cannot satisfy that gate; repair completion records a review instruction to run the normal check. Exit code 0 means the requested routine completed without recorded warnings; 1 means a failed or unavailable essential check; 2 means review is needed. These results cannot prove that every application is healthy, that no malware exists, or that a backup is restorable. Test backup recovery separately.
 
+Direct maintenance runs print a final **OK** (green, exit 0), **REVIEW** (yellow, exit 2), or **ACTION NEEDED** (red, exit 1) line after saving their reports. The label uses the same recorded result as the exit code; the text remains meaningful when color is unavailable.
+
 Deleting files from the source may not reduce an incremental backup by the same amount, because backup retention and stored restore points still consume space. Use the script before a backup for maintenance and measurement, then use the backup application's supported retention or compact operation when older backup chains need to shrink.
 
 ## Official references

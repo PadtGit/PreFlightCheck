@@ -487,7 +487,20 @@ try {
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
 }
-if ($null -eq $report -or @($report.Results | Where-Object { $_.Status -eq 'Failed' }).Count -gt 0) { exit 1 }
-if (@($report.Results | Where-Object { $_.Status -eq 'Review' }).Count -gt 0) { exit 2 }
-exit 0
+$statusMessage = New-Object -TypeName System.Management.Automation.HostInformationMessage
+if ($null -eq $report -or @($report.Results | Where-Object { $_.Status -eq 'Failed' }).Count -gt 0) {
+    $statusMessage.Message = 'ACTION NEEDED - The routine failed or could not complete. Review the saved reports and tool output before further maintenance or backup.'
+    $statusMessage.ForegroundColor = [ConsoleColor]::Red
+    $exitCode = 1
+} elseif (@($report.Results | Where-Object { $_.Status -eq 'Review' }).Count -gt 0) {
+    $statusMessage.Message = 'REVIEW - The routine completed with findings that need attention. Review the saved reports before further maintenance or backup.'
+    $statusMessage.ForegroundColor = [ConsoleColor]::Yellow
+    $exitCode = 2
+} else {
+    $statusMessage.Message = 'OK - The requested routine completed. Review the saved reports before starting the backup.'
+    $statusMessage.ForegroundColor = [ConsoleColor]::Green
+    $exitCode = 0
+}
+Write-Information -MessageData $statusMessage -InformationAction Continue
+exit $exitCode
 
