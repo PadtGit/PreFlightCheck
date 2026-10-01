@@ -161,6 +161,34 @@ Describe 'Dashboard result presentation' {
     }
 }
 
+Describe 'Saved WinGet application lists' {
+    It 'retains the complete <Task> output after successful completion' -ForEach @(
+        @{ Task = 'UpdatePreview'; Step = 'AvailableAppUpdatesOutput' },
+        @{ Task = 'InstalledApps'; Step = 'InstalledAppsOutput' }
+    ) {
+        $appList = "Name  Id  Version  Available`nExample  Example.App  1.0  2.0"
+        $report = [pscustomobject]@{ Results = @([pscustomobject]@{ Step = $Step; Status = 'Observed'; Detail = $appList }) }
+        $evidence = Get-GuiResultEvidence -Task $Task -ExitCode 0 -Report $report -ReportPath 'C:\fixture\report.json'
+        $parameters = @{ Presentation = (Get-GuiResultPresentation -ExitCode 0); Task = $Task; Finished = [datetime]'2026-10-01T05:00:00'; ExitCode = 0; Evidence = $evidence; RunDirectory = 'C:\fixture\run'; ConsolePath = 'C:\fixture\run\console.txt' }
+
+        $summary = Format-GuiTaskSummary @parameters
+        $details = Format-GuiTaskDetail @parameters
+
+        $evidence.ApplicationOutput | Should -Be $appList
+        $summary | Should -Match 'Show details'
+        $summary | Should -Not -Match 'Example.App'
+        $details | Should -Match ([regex]::Escape($appList))
+        $details | Should -Match 'WinGet application list'
+        $details | Should -Not -Match 'Exit code legend'
+    }
+
+    It 'keeps unrelated successful tasks concise even when their report has application output' {
+        $report = [pscustomobject]@{ Results = @([pscustomobject]@{ Step = 'AvailableAppUpdatesOutput'; Status = 'Observed'; Detail = 'Example.App' }) }
+        $evidence = Get-GuiResultEvidence -Task Audit -ExitCode 0 -Report $report
+        $evidence.ApplicationOutput | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Interactive result details' {
     BeforeAll {
         $dashboardAst = [System.Management.Automation.Language.Parser]::ParseFile($dashboardPath, [ref]$null, [ref]$null)

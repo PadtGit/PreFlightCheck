@@ -140,7 +140,12 @@ function Get-GuiResultEvidence {
     if ($ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($reason)) {
         $reason = 'No specific reason was recorded in the saved report. Check the detailed output.'
     }
-    [pscustomobject]@{ Reason = $reason; RawReason = $rawReason; Findings = $findings; ToolOutput = $toolOutput; ReportPath = $ReportPath }
+    $applicationOutput = ''
+    if ($Report -and $Task -in @('UpdatePreview','InstalledApps')) {
+        $outputStep = if ($Task -eq 'InstalledApps') { 'InstalledAppsOutput' } else { 'AvailableAppUpdatesOutput' }
+        $applicationOutput = (@($Report.Results | Where-Object { $_.Step -eq $outputStep } | ForEach-Object { [string]$_.Detail }) -join [Environment]::NewLine)
+    }
+    [pscustomobject]@{ Reason = $reason; RawReason = $rawReason; Findings = $findings; ToolOutput = $toolOutput; ReportPath = $ReportPath; ApplicationOutput = $applicationOutput }
 }
 
 function Format-GuiTaskSummary {
@@ -169,6 +174,9 @@ function Format-GuiTaskSummary {
     if ($ExitCode -ne 0 -and $Evidence -and $Evidence.ToolOutput) { $summaryLines.Add("Tool output: $($Evidence.ToolOutput)") }
     if ($Task -eq 'PreBackupRun' -and $ExitCode -eq 1) { $summaryLines.Add('The guided sequence stopped here; later steps were not run.') }
     $summaryLines.Add("Next: $($Presentation.NextAction)")
+    if ($Evidence -and $Evidence.PSObject.Properties['ApplicationOutput'] -and $Evidence.ApplicationOutput) {
+        $summaryLines.Add('WinGet application list: Select Show details to view the saved output.')
+    }
     if ($ExitCode -ne 0 -and $Evidence -and @($Evidence.Findings).Count -gt 0) {
         $count = @($Evidence.Findings).Count
         $label = if ($count -eq 1) { 'finding' } else { 'findings' }
@@ -182,7 +190,7 @@ function Format-GuiTaskSummary {
 function Format-GuiTaskDetail {
     <#
     .SYNOPSIS
-        Formats expandable evidence for a task that needs review or action.
+        Formats saved task output and expandable evidence for review or action.
     #>
     [CmdletBinding()]
     param(
@@ -197,6 +205,11 @@ function Format-GuiTaskDetail {
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((Format-GuiTaskSummary -Presentation $Presentation -Task $Task -Finished $Finished -ExitCode $ExitCode -Evidence $Evidence -RunDirectory $RunDirectory -ConsolePath $ConsolePath))
+    if ($Evidence -and $Evidence.PSObject.Properties['ApplicationOutput'] -and $Evidence.ApplicationOutput) {
+        $lines.Add('')
+        $lines.Add('WinGet application list:')
+        $lines.Add([string]$Evidence.ApplicationOutput)
+    }
     if ($ExitCode -eq 0) { return $lines -join [Environment]::NewLine }
     if ($Evidence -and $Evidence.ToolOutput) {
         $lines.Add('')
