@@ -394,4 +394,14 @@ function Get-LiveActivityText {
     ) -join [Environment]::NewLine
 }
 
-Export-ModuleMember -Function Get-DashboardStateStyle, Get-GuiResultPresentation, Get-GuiResultEvidence, Format-GuiTaskSummary, Format-GuiTaskDetail, Get-LiveActivityState, Get-LiveActivityText
+function Get-CleanupSelectionKey {
+    <# .SYNOPSIS Identifies valid cleanup selections for matching a completed preview. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$MinimumAgeDays, [bool]$EmptyRecycleBin, [bool]$ClearDeliveryCache)
+    $age = 0
+    if (-not [int]::TryParse($MinimumAgeDays, [ref]$age) -or $age -lt 7 -or $age -gt 365) { return $null }
+    return '{0}|{1}|{2}' -f $age, $EmptyRecycleBin, $ClearDeliveryCache
+}
+
+Export-ModuleMember -Function Get-CleanupSelectionKey, Get-DashboardStateStyle, Get-GuiResultPresentation, Get-GuiResultEvidence, Format-GuiTaskSummary, Format-GuiTaskDetail, Get-LiveActivityState, Get-LiveActivityText

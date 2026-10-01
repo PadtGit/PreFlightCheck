@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Require a successful dashboard cleanup preview matching the selected age and optional actions before applying cleanup; include Recycle Bin and Delivery Optimization selections in dashboard and guided previews.
 - Block component-store cleanup when earlier integrity, file-system, or essential inventory checks are incomplete or require review, repair, or restart.
 - Require normal Windows and file-system health checks in every actual cleanup invocation, blocking all cleanup actions on health review, repair, restart, or failure; keep cleanup previews available without health scans.
 - Show the saved stopping reason and nearby tool output directly in dashboard results, with expandable report findings and an exit-code legend on every task page that needs review or action; keep successful results concise.

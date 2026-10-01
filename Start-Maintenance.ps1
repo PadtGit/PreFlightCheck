@@ -39,6 +39,7 @@ $script:runDirectory = $null
 $script:sessionDirectory = $null
 $script:taskNumber = 0
 $script:healthReady = $false
+$script:cleanupPreviewKey = $null
 $script:taskStatus = 'IDLE — Ready'
 $script:lastPage = 'Runbook'
 $script:activeTask = $null
@@ -118,10 +119,12 @@ function Update-CleanupAvailability {
     $Apply.IsEnabled = -not $taskRunning
     if (-not $taskRunning) { $Status.Text = $script:taskStatus }
     if ($script:lastPage -ne 'Cleanup') { return }
-    $Apply.IsEnabled = -not $taskRunning -and $script:healthReady
+    $selectionKey = Get-CleanupSelectionKey -MinimumAgeDays $ValueInput.Text -EmptyRecycleBin ([bool]$OptionOne.IsChecked) -ClearDeliveryCache ([bool]$OptionTwo.IsChecked)
+    $previewMatches = $selectionKey -and $script:cleanupPreviewKey -eq $selectionKey
+    $Apply.IsEnabled = -not $taskRunning -and $script:healthReady -and $previewMatches
     if ($script:healthReady) {
-        $Apply.Content = 'Clean reviewed items…'
-        $Access.Text = 'Health checks passed in this session. Preview cleanup and review the results before applying changes.'
+        $Apply.Content = if ($previewMatches) { 'Clean reviewed items…' } else { 'Preview cleanup first' }
+        $Access.Text = if ($previewMatches) { 'Health checks passed. The completed preview matches these cleanup options. Review its results before applying changes.' } else { 'Health checks passed. Preview these cleanup options and review the results before applying changes.' }
     } else {
         $Apply.Content = 'Cleanup locked'
         $Access.Text = 'CLEANUP LOCKED: Run normal Windows health checks successfully before applying cleanup. Preview is available.'
@@ -228,8 +231,12 @@ function Start-DashboardTask {
             }
             'Cleanup' {
                 $request.MinimumAgeDays = Get-CleanupAge
+                $request.EmptyRecycleBin = [bool]$OptionOne.IsChecked
+                $request.ClearDeliveryCache = [bool]$OptionTwo.IsChecked
                 if ($ApplyChanges) {
                     if (-not $script:healthReady) { throw 'Run Windows health checks first. Cleanup stays locked until this dashboard session records a healthy result with no restart required.' }
+                    $selectionKey = Get-CleanupSelectionKey -MinimumAgeDays $request.MinimumAgeDays -EmptyRecycleBin $request.EmptyRecycleBin -ClearDeliveryCache $request.ClearDeliveryCache
+                    if (-not $selectionKey -or $script:cleanupPreviewKey -ne $selectionKey) { throw 'Preview the selected cleanup options and review the results before applying cleanup.' }
                     $request.Task = 'Clean'; $request.EmptyRecycleBin = [bool]$OptionOne.IsChecked; $request.ClearDeliveryCache = [bool]$OptionTwo.IsChecked; $requiresAdmin = $true
                 }
                 else { $request.Task = 'CleanPreview' }
@@ -266,6 +273,7 @@ function Start-DashboardTask {
         if ($requiresAdmin -and -not $isAdmin) { $start.Verb = 'runas' }
         foreach ($argument in @('-NoLogo','-NoProfile','-File',$worker,'-RequestPath',$requestPath)) { [void]$start.ArgumentList.Add($argument) }
         $script:active = [Diagnostics.Process]::Start($start)
+        $script:cleanupPreviewKey = $null
         $script:activeTask = [string]$request.Task
         $script:taskStartedAt = [datetime]::Now
         $script:liveActivityState = $null
@@ -288,7 +296,11 @@ function Start-DashboardTask {
 $RunbookButton.Add_Click({ Show-Page Runbook }); $AuditButton.Add_Click({ Show-Page Audit }); $ApplicationsButton.Add_Click({ Show-Page Applications }); $CleanupButton.Add_Click({ Show-Page Cleanup }); $HealthButton.Add_Click({ Show-Page Health }); $SystemRepairButton.Add_Click({ Show-Page SystemRepair }); $DellButton.Add_Click({ Show-Page Dell })
 $Preview.Add_Click({ Start-DashboardTask }); $Apply.Add_Click({ Start-DashboardTask -ApplyChanges })
 $InstallUpgradeButton.Add_Click({ Start-DashboardTask -RequestedAction Install }); $UninstallButton.Add_Click({ Start-DashboardTask -RequestedAction Uninstall }); $UpgradeAllButton.Add_Click({ Start-DashboardTask -RequestedAction UpgradeAll }); $ShowInstalledButton.Add_Click({ Start-DashboardTask -RequestedAction Installed }); $ClearSelectionButton.Add_Click({ $ValueInput.Text = '' })
-$ValueInput.Add_TextChanged({ if ($script:lastPage -eq 'Applications') { $count = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }); $SelectionCount.Text = "Selected Apps: $($count.Count)" } })
+$ValueInput.Add_TextChanged({ if ($script:lastPage -eq 'Applications') { $count = @($ValueInput.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }); $SelectionCount.Text = "Selected Apps: $($count.Count)" }; if ($script:lastPage -eq 'Cleanup') { Update-CleanupAvailability } })
+$OptionOne.Add_Checked({ Update-CleanupAvailability })
+$OptionOne.Add_Unchecked({ Update-CleanupAvailability })
+$OptionTwo.Add_Checked({ Update-CleanupAvailability })
+$OptionTwo.Add_Unchecked({ Update-CleanupAvailability })
 $ShowDetails.Add_Click({
     $fileName = if ($script:detailsVisible) { 'summary.txt' } else { 'details.txt' }
     $displayPath = Join-Path -Path $script:runDirectory -ChildPath $fileName
@@ -331,6 +343,8 @@ $timer.Add_Tick({
             $ActivityProgress.Value = 0
             $ActivityProgress.Visibility = 'Collapsed'
             $completedRequestPath = Join-Path -Path $runDirectory -ChildPath 'request.json'
+            $completedRequest = $null
+            $script:cleanupPreviewKey = $null
             if (Test-Path -LiteralPath $completedRequestPath) {
                 $completedRequest = Get-Content -LiteralPath $completedRequestPath -Raw | ConvertFrom-Json
                 if ($completedRequest.Task -in @('HealthCheck','HealthRepair','SystemRepair','PreBackupRun')) { $script:healthReady = $false }
@@ -348,6 +362,14 @@ $timer.Add_Tick({
             $finishedPath = Join-Path -Path $runDirectory -ChildPath 'finished.json'
             if (Test-Path -LiteralPath $finishedPath) {
                 $finished = Get-Content -LiteralPath $finishedPath -Raw | ConvertFrom-Json
+                if ($finished.Task -eq 'CleanPreview' -and $finished.ExitCode -eq 0 -and $hasSummary -and
+                    -not $finished.RestartRequired -and -not $finished.RepairRecommended -and
+                    $completedRequest -and $completedRequest.Task -eq 'CleanPreview' -and
+                    $completedRequest.PSObject.Properties['MinimumAgeDays'] -and
+                    $completedRequest.PSObject.Properties['EmptyRecycleBin'] -and
+                    $completedRequest.PSObject.Properties['ClearDeliveryCache']) {
+                    $script:cleanupPreviewKey = Get-CleanupSelectionKey -MinimumAgeDays $completedRequest.MinimumAgeDays -EmptyRecycleBin ([bool]$completedRequest.EmptyRecycleBin) -ClearDeliveryCache ([bool]$completedRequest.ClearDeliveryCache)
+                }
                 if ($finished.Task -in @('HealthRepair','SystemRepair')) { $script:healthReady = $false }
                 elseif ($finished.Task -in @('HealthCheck','PreBackupRun')) {
                     $script:healthReady = [bool]$finished.HealthReady -and $finished.ExitCode -eq 0

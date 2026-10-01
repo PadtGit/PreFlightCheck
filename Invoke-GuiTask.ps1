@@ -96,7 +96,11 @@ switch ($request.Task) {
     }
     'UpdateAll' { $arguments += @('-Mode','Updates','-UpgradeAll','-MaintenanceWindowConfirmed') }
     'InstalledApps' { $arguments += @('-Mode','Updates','-ShowInstalled') }
-    'CleanPreview' { $arguments += @('-Mode','Clean','-MinimumAgeDays',[string][int]$request.MinimumAgeDays,'-WhatIf') }
+    'CleanPreview' {
+        $arguments += @('-Mode','Clean','-MinimumAgeDays',[string][int]$request.MinimumAgeDays,'-WhatIf')
+        if ($request.PSObject.Properties['EmptyRecycleBin'] -and $request.EmptyRecycleBin) { $arguments += '-EmptyRecycleBin' }
+        if ($request.PSObject.Properties['ClearDeliveryCache'] -and $request.ClearDeliveryCache) { $arguments += '-ClearDeliveryCache' }
+    }
     'Clean' {
         $arguments += @('-Mode','Clean','-MinimumAgeDays',[string][int]$request.MinimumAgeDays,'-MaintenanceWindowConfirmed')
         if ($request.EmptyRecycleBin) { $arguments += '-EmptyRecycleBin' }

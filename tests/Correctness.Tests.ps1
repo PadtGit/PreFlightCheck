@@ -9,7 +9,7 @@ BeforeAll {
     $maintenanceAst = [System.Management.Automation.Language.Parser]::ParseFile($maintenancePath, [ref]$null, [ref]$null)
     $dashboardAst = [System.Management.Automation.Language.Parser]::ParseFile($dashboardPath, [ref]$null, [ref]$null)
     $script:taskStatus = 'Ready'
-    foreach ($functionName in @('Update-CleanupAvailability', 'Show-DashboardWarning')) {
+    foreach ($functionName in @('Update-CleanupAvailability', 'Show-DashboardWarning', 'Get-CleanupAge')) {
         $node = $dashboardAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $ast.Name -eq $functionName }, $true)
         if ($node) { . ([scriptblock]::Create($node.Extent.Text)) }
     }
@@ -417,6 +417,7 @@ Describe 'Cleanup action availability' {
         [void][IO.Directory]::CreateDirectory($script:runDirectory)
         $script:active = $null
         $script:healthReady = $false
+        $script:cleanupPreviewKey = $null
         $script:taskStatus = 'Ready'
         $script:taskStartedAt = $null
         $script:liveActivityState = $null
@@ -448,9 +449,70 @@ Describe 'Cleanup action availability' {
         @{ Task = 'HealthCheck'; ExitCode = 0; HealthReady = $true; RestartRequired = $false; RepairRecommended = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
         & $completionHandler
         $script:active | Should -BeNullOrEmpty
-        $Apply.IsEnabled | Should -BeTrue
+        $Apply.IsEnabled | Should -BeFalse
         $Apply.Content | Should -Not -Match 'locked'
         $Access.Text | Should -Not -Match 'CLEANUP LOCKED'
+    }
+
+    It 'requires a preview even when health is ready' {
+        $script:healthReady = $true
+        Show-Page -Page Cleanup
+        $Apply.IsEnabled | Should -BeFalse
+        $Access.Text | Should -Match 'Preview'
+    }
+
+    It 'rejects apply requests that bypass the disabled button without a preview' {
+        $script:healthReady = $true
+        Show-Page -Page Cleanup
+        $startTask = $dashboardAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $ast.Name -eq 'Start-DashboardTask' }, $true)
+        $mapping = $startTask.Find({ param($ast) $ast -is [System.Management.Automation.Language.SwitchStatementAst] }, $true)
+        $request = @{}
+        $ApplyChanges = $true
+        { . ([scriptblock]::Create($mapping.Extent.Text)) } | Should -Throw '*Preview the selected cleanup options*'
+    }
+
+    It 'rejects incomplete preview metadata missing <Field>' -ForEach @(
+        @{ Field = 'MinimumAgeDays' }, @{ Field = 'EmptyRecycleBin' }, @{ Field = 'ClearDeliveryCache' }
+    ) {
+        $script:healthReady = $true
+        Show-Page -Page Cleanup
+        $script:active = [pscustomobject]@{ HasExited = $true }
+        $script:active | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        $request = @{ Task = 'CleanPreview'; MinimumAgeDays = 14; EmptyRecycleBin = $false; ClearDeliveryCache = $false }
+        $request.Remove($Field)
+        $request | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'request.json')
+        @{ Task = 'CleanPreview'; ExitCode = 0; HealthReady = $false; RestartRequired = $false; RepairRecommended = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
+        & $completionHandler
+        $Apply.IsEnabled | Should -BeFalse
+    }
+
+    It 'enables cleanup only for a successful preview of unchanged selections' {
+        $script:healthReady = $true
+        Show-Page -Page Cleanup
+        $script:active = [pscustomobject]@{ HasExited = $true }
+        $script:active | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        @{ Task = 'CleanPreview'; MinimumAgeDays = 14; EmptyRecycleBin = $false; ClearDeliveryCache = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'request.json')
+        @{ Task = 'CleanPreview'; ExitCode = 0; HealthReady = $false; RestartRequired = $false; RepairRecommended = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
+        & $completionHandler
+        $Apply.IsEnabled | Should -BeTrue
+        $ValueInput.Text = '21'
+        Update-CleanupAvailability
+        $Apply.IsEnabled | Should -BeFalse
+        $ValueInput.Text = '14'
+        $OptionOne.IsChecked = $true
+        Update-CleanupAvailability
+        $Apply.IsEnabled | Should -BeFalse
+    }
+
+    It 'does not unlock cleanup after a failed preview' {
+        $script:healthReady = $true
+        Show-Page -Page Cleanup
+        $script:active = [pscustomobject]@{ HasExited = $true }
+        $script:active | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        @{ Task = 'CleanPreview'; MinimumAgeDays = 14; EmptyRecycleBin = $false; ClearDeliveryCache = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'request.json')
+        @{ Task = 'CleanPreview'; ExitCode = 1; HealthReady = $false; RestartRequired = $false; RepairRecommended = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
+        & $completionHandler
+        $Apply.IsEnabled | Should -BeFalse
     }
 
     It 'clears the cleanup-only idle label when navigating to Windows health' {
@@ -487,6 +549,7 @@ Describe 'Cleanup action availability' {
         @{ Task = 'HealthCheck'; Code = 2 }
     ) {
         $script:healthReady = $true
+        $script:cleanupPreviewKey = Get-CleanupSelectionKey -MinimumAgeDays 14 -EmptyRecycleBin $false -ClearDeliveryCache $false
         Show-Page -Page Cleanup
         $Apply.IsEnabled | Should -BeTrue
         $script:active = [pscustomobject]@{ HasExited = $true }
