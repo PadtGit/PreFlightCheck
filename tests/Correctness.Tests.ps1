@@ -401,6 +401,18 @@ Describe 'Dashboard health eligibility from completed tasks' {
         $script:healthReady | Should -BeTrue
     }
 
+    It 'keeps details available for a successful <Task> result' -ForEach @(
+        @{ Task = 'UpdatePreview'; Enabled = $true },
+        @{ Task = 'InstalledApps'; Enabled = $true },
+        @{ Task = 'Audit'; Enabled = $false }
+    ) {
+        Set-Content (Join-Path $runDirectory 'details.txt') 'Saved WinGet application list'
+        @{ Task = $Task; ExitCode = 0; HealthReady = $false; RestartRequired = $false; RepairRecommended = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json')
+        & $completionHandler
+        $ShowDetails.IsEnabled | Should -Be $Enabled
+        $Console.Text | Should -Match 'Fixture summary'
+    }
+
     It 'clears stale readiness when a repair worker exits without saving finished.json' {
         @{ Task = 'SystemRepair' } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'request.json')
         & $completionHandler

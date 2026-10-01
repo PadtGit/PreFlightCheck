@@ -383,7 +383,7 @@ $timer.Add_Tick({
                 $displayState = if ($finished.PSObject.Properties['DisplayState']) { [string]$finished.DisplayState } elseif ($finished.RestartRequired) { 'Restart' } elseif ($finished.RepairRecommended) { 'Repair' } elseif ($finished.ExitCode -eq 0) { 'Success' } elseif ($finished.ExitCode -eq 2) { 'Review' } else { 'ActionNeeded' }
                 $statusLabel = if ($finished.PSObject.Properties['StatusLabel']) { [string]$finished.StatusLabel } else { $null }
                 $detailsPath = Join-Path -Path $runDirectory -ChildPath 'details.txt'
-                $ShowDetails.IsEnabled = $finished.ExitCode -ne 0 -and (Test-Path -LiteralPath $detailsPath)
+                $ShowDetails.IsEnabled = ($finished.ExitCode -ne 0 -or $finished.Task -in @('UpdatePreview','InstalledApps')) -and (Test-Path -LiteralPath $detailsPath)
                 if ($hasSummary) { Set-DashboardStatus -State $displayState -Label $statusLabel }
                 else { Set-DashboardStatus -State ActionNeeded -Label 'ACTION NEEDED — Result summary missing' }
                 $script:taskStatus = $Status.Text
