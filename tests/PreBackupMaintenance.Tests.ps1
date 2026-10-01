@@ -24,7 +24,7 @@ Describe 'PreBackupMaintenance safety contract' {
     }
 
     It 'invokes repair tools directly with discrete arguments' {
-        $repairBlock = [regex]::Match($maintenanceText, '(?s)if \(\$Mode -eq ''SystemRepair''\).*?(?=if \(\$Mode -eq ''Health''\))').Value
+        $repairBlock = [regex]::Match($maintenanceText, '(?s)if \(\$Mode -eq ''SystemRepair''\).*?(?=if \(\$Mode -eq ''Health'')').Value
 
         $repairBlock | Should -Match 'System32\\chkdsk\.exe.*@\(''/scan'',''/perf''\)'
         $repairBlock | Should -Match 'System32\\sfc\.exe.*@\(''/scannow''\)'

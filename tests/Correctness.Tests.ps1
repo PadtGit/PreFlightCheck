@@ -25,7 +25,7 @@ BeforeAll {
     $modeBlocks = @{}
     foreach ($modeName in @('SystemRepair', 'Health', 'Updates')) {
         $condition = '$Mode -eq ''' + $modeName + ''''
-        $node = $maintenanceAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.IfStatementAst] -and $ast.Clauses[0].Item1.Extent.Text -eq $condition }, $true)
+        $node = $maintenanceAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.IfStatementAst] -and $ast.Clauses[0].Item1.Extent.Text.StartsWith($condition) }, $true)
         $modeBlocks[$modeName] = [scriptblock]::Create($node.Extent.Text)
     }
     foreach ($functionName in @('Add-Result', 'Invoke-LoggedProgram')) {
@@ -44,6 +44,26 @@ BeforeAll {
         $OpenUpdatePages = $false
         . $modeBlocks[$Mode]
     }
+
+    function Invoke-CleanupFixture {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSShouldProcess', '', Justification = 'Executes production orchestration with real WhatIf semantics and mocked cleanup operations.')]
+        [CmdletBinding(SupportsShouldProcess)]
+        param()
+        $Mode = 'Clean'
+        $RepairWindows = $false
+        $ComponentCleanup = $false
+        $EmptyRecycleBin = $true
+        $ClearDeliveryCache = $true
+        $MinimumAgeDays = 14
+        $tempRoots = @('C:\FixtureTemp')
+        $mainTry = $maintenanceAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.TryStatementAst] } | Select-Object -First 1
+        foreach ($statement in $mainTry.Body.Statements) {
+            if ($statement -is [System.Management.Automation.Language.IfStatementAst] -and
+                $statement.Clauses[0].Item1.Extent.Text -match '^\$Mode -eq ''(Health|Clean)''') {
+                . ([scriptblock]::Create($statement.Extent.Text))
+            }
+        }
+    }
 }
 
 Describe 'Health gate behavior' {
@@ -52,7 +72,7 @@ Describe 'Health gate behavior' {
         $script:report = [pscustomobject]@{
             HealthReady = $false; RepairRecommended = $false; RestartRequired = $false; RestartAfter = $null
             Restart = [pscustomobject]@{ Pending = $false; Unknown = @() }
-            Results = [System.Collections.Generic.List[object]]::new()
+            Results = [System.Collections.Generic.List[object]]::new(); Cleanup = @()
             VolumesBefore = @([pscustomobject]@{ DriveType = 'Fixed'; DriveLetter = 'C'; FileSystem = 'NTFS' })
         }
         $script:diskCode = 0
@@ -92,6 +112,54 @@ Describe 'Health gate behavior' {
             return $code
         }
         Mock Repair-Volume { $script:cleanRepairStatus }
+        Mock Remove-AgedTemporaryFile {
+            $script:nativeCalls.Add('Cleanup')
+            [pscustomobject]@{ Failed = 0 }
+        }
+        Mock Clear-RecycleBin {}
+        Mock Delete-DeliveryOptimizationCache {}
+    }
+
+    It 'blocks every cleanup action when health requires review' {
+        $script:diskCode = 1
+        { Invoke-CleanupFixture } | Should -Throw '*HEALTH REVIEW REQUIRED*'
+        Should -Invoke Remove-AgedTemporaryFile -Times 0 -Exactly
+        Should -Invoke Clear-RecycleBin -Times 0 -Exactly
+        Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
+    }
+
+    It 'checks health before deleting files on a direct cleanup call' {
+        Invoke-CleanupFixture
+        $report.HealthReady | Should -BeTrue
+        $nativeCalls.IndexOf('CHKDSK-C') | Should -BeGreaterOrEqual 0
+        $nativeCalls.IndexOf('Cleanup') | Should -BeGreaterThan $nativeCalls.IndexOf('CHKDSK-C')
+        Should -Invoke Clear-RecycleBin -Times 1 -Exactly
+        Should -Invoke Delete-DeliveryOptimizationCache -Times 1 -Exactly
+    }
+
+    It 'blocks cleanup when a health scan fails' {
+        Mock Invoke-LoggedProgram { throw 'Fixture health scan failed' }
+        { Invoke-CleanupFixture } | Should -Throw '*Fixture health scan failed*'
+        Should -Invoke Remove-AgedTemporaryFile -Times 0 -Exactly
+        Should -Invoke Clear-RecycleBin -Times 0 -Exactly
+        Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
+    }
+
+    It 'blocks cleanup when health checks discover a pending restart' {
+        $script:restartPending = $true
+        { Invoke-CleanupFixture } | Should -Throw '*HEALTH REVIEW REQUIRED*'
+        $report.RestartRequired | Should -BeTrue
+        Should -Invoke Remove-AgedTemporaryFile -Times 0 -Exactly
+        Should -Invoke Clear-RecycleBin -Times 0 -Exactly
+        Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
+    }
+
+    It 'keeps cleanup preview available without health scans or deletion' {
+        Invoke-CleanupFixture -WhatIf
+        $nativeCalls.Count | Should -Be 0
+        Should -Invoke Remove-AgedTemporaryFile -Times 0 -Exactly
+        Should -Invoke Clear-RecycleBin -Times 0 -Exactly
+        Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
     }
 
     It 'keeps cleanup locked after a successful SystemRepair and asks for a normal health check' {
