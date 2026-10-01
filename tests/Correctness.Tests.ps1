@@ -9,6 +9,7 @@ BeforeAll {
     $maintenanceAst = [System.Management.Automation.Language.Parser]::ParseFile($maintenancePath, [ref]$null, [ref]$null)
     $dashboardAst = [System.Management.Automation.Language.Parser]::ParseFile($dashboardPath, [ref]$null, [ref]$null)
     $script:taskStatus = 'Ready'
+    $script:taskState = 'Idle'
     foreach ($functionName in @('Update-CleanupAvailability', 'Show-DashboardWarning', 'Get-CleanupAge')) {
         $node = $dashboardAst.Find({ param($ast) $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $ast.Name -eq $functionName }, $true)
         if ($node) { . ([scriptblock]::Create($node.Extent.Text)) }
@@ -16,9 +17,12 @@ BeforeAll {
     function Set-DashboardStatus {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Test adapter updates only a fixture control and performs no system state changes.')]
         [CmdletBinding()]
-        param([string]$State, [string]$Label)
-        if ($Label) { $Status.Text = $Label; return }
-        $Status.Text = (Get-DashboardStateStyle -State $State).Label
+        param([string]$State, [string]$Label, [switch]$PresentationOnly)
+        $Status.Text = if ($Label) { $Label } else { (Get-DashboardStateStyle -State $State).Label }
+        if (-not $PresentationOnly) {
+            $script:taskState = $State
+            $script:taskStatus = $Status.Text
+        }
     }
     # Execute the actual orchestration branches without the inventory/bootstrap or native tools.
     # AST selection is a test seam, not a source-text assertion.

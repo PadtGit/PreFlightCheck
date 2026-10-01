@@ -41,6 +41,7 @@ $script:taskNumber = 0
 $script:healthReady = $false
 $script:cleanupPreviewKey = $null
 $script:taskStatus = 'IDLE — Ready'
+$script:taskState = 'Idle'
 $script:lastPage = 'Runbook'
 $script:activeTask = $null
 $script:taskStartedAt = $null
@@ -81,8 +82,9 @@ function Set-DashboardStatus {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Updates only dashboard presentation controls and performs no system state changes.')]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair')][string]$State,
-        [string]$Label
+        [Parameter(Mandatory)][ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair','CleanupLocked')][string]$State,
+        [string]$Label,
+        [switch]$PresentationOnly
     )
 
     $style = Get-DashboardStateStyle -State $State
@@ -90,6 +92,10 @@ function Set-DashboardStatus {
     $Status.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Foreground)
     $StatusBorder.Background = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Background)
     $StatusBorder.BorderBrush = [Windows.Media.BrushConverter]::new().ConvertFromString($style.Border)
+    if (-not $PresentationOnly) {
+        $script:taskState = $State
+        $script:taskStatus = $Status.Text
+    }
 }
 function Set-LiveActivityPresentation {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Updates only dashboard presentation controls and performs no system state changes.')]
@@ -117,7 +123,7 @@ function Update-CleanupAvailability {
     param()
     $taskRunning = $script:active -and -not $script:active.HasExited
     $Apply.IsEnabled = -not $taskRunning
-    if (-not $taskRunning) { $Status.Text = $script:taskStatus }
+    if (-not $taskRunning) { Set-DashboardStatus -State $script:taskState -Label $script:taskStatus -PresentationOnly }
     if ($script:lastPage -ne 'Cleanup') { return }
     $selectionKey = Get-CleanupSelectionKey -MinimumAgeDays $ValueInput.Text -EmptyRecycleBin ([bool]$OptionOne.IsChecked) -ClearDeliveryCache ([bool]$OptionTwo.IsChecked)
     $previewMatches = $selectionKey -and $script:cleanupPreviewKey -eq $selectionKey
@@ -129,10 +135,10 @@ function Update-CleanupAvailability {
         $Apply.Content = 'Cleanup locked'
         $Access.Text = 'CLEANUP LOCKED: Run normal Windows health checks successfully before applying cleanup. Preview is available.'
         if (-not $taskRunning) {
-            if ($Status.Text -match '^(RESTART|REPAIR|ACTION NEEDED|WINDOWS REPAIR RECOMMENDED|NEEDS ATTENTION|REVIEW)\b') {
-                $Status.Text = 'CLEANUP LOCKED - ' + $Status.Text
+            if ($script:taskState -in @('Restart','Repair','ActionNeeded','Review')) {
+                Set-DashboardStatus -State $script:taskState -Label ('CLEANUP LOCKED - ' + $script:taskStatus) -PresentationOnly
             } else {
-                $Status.Text = 'CLEANUP LOCKED - run Windows health checks first'
+                Set-DashboardStatus -State CleanupLocked -PresentationOnly
             }
         }
     }
@@ -426,6 +432,7 @@ if ($UiTestOutput) {
         $ValueInput.Text = '14'; if ((Get-CleanupAge) -ne 14) { throw 'Valid cleanup age rejected.' }
     }
     Set-DashboardStatus -State $UiState
+    if ($UiPage -eq 'Cleanup' -and $UiState -ne 'Running') { Update-CleanupAvailability }
     if ($UiState -eq 'Running') {
         $CurrentOperation.Text = 'Current operation: DISM-Health: Restoring the component store'
         $ElapsedTask.Text = 'Elapsed: 00:01:42'

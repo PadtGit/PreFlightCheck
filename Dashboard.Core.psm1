@@ -10,7 +10,7 @@ function Get-DashboardStateStyle {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair')]
+        [ValidateSet('Idle','Running','Success','Review','ActionNeeded','Restart','Repair','CleanupLocked')]
         [string]$State
     )
 
@@ -19,6 +19,7 @@ function Get-DashboardStateStyle {
         'Running' { return [pscustomobject]@{ Label = 'RUNNING — Maintenance in progress'; Foreground = '#8BD5FF'; Background = '#102B3A'; Border = '#2D93C4' } }
         'Success' { return [pscustomobject]@{ Label = 'SUCCESS — Task completed'; Foreground = '#7BE0B5'; Background = '#12352F'; Border = '#2A9D78' } }
         'Review' { return [pscustomobject]@{ Label = 'REVIEW — Open the saved report'; Foreground = '#F3C87F'; Background = '#3A2D16'; Border = '#C99339' } }
+        'CleanupLocked' { return [pscustomobject]@{ Label = 'CLEANUP LOCKED — run Windows health checks first'; Foreground = '#F3C87F'; Background = '#3A2D16'; Border = '#C99339' } }
         'ActionNeeded' { return [pscustomobject]@{ Label = 'ACTION NEEDED — Open the saved result'; Foreground = '#F2A093'; Background = '#3B201E'; Border = '#C85A4A' } }
         'Restart' { return [pscustomobject]@{ Label = 'RESTART — Required before cleanup or backup'; Foreground = '#FFD08A'; Background = '#3B2917'; Border = '#D98A32' } }
         'Repair' { return [pscustomobject]@{ Label = 'REPAIR — Windows repair recommended'; Foreground = '#FFAD8A'; Background = '#3B241C'; Border = '#D66D45' } }
