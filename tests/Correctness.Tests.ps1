@@ -76,6 +76,7 @@ Describe 'Health gate behavior' {
             VolumesBefore = @([pscustomobject]@{ DriveType = 'Fixed'; DriveLetter = 'C'; FileSystem = 'NTFS' })
         }
         $script:diskCode = 0
+        $script:sfcOutput = 'Windows Resource Protection did not find any integrity violations.'
         $script:rawChkdskDrive = $null
         $script:repairCode = 0
         $script:restartPending = $false
@@ -108,7 +109,7 @@ Describe 'Health gate behavior' {
             if ($Name -eq 'SystemRepair-DISM') { $code = $script:repairCode }
             if ($code -notin $AcceptedCodes) { throw "$Name returned $code" }
             if ($Name -eq 'DISM-Health') { Set-Content (Join-Path $script:runDirectory 'DISM-Health.txt') 'No component store corruption detected.' }
-            if ($Name -eq 'SFC') { Set-Content (Join-Path $script:runDirectory 'SFC.txt') 'Windows Resource Protection did not find any integrity violations.' }
+            if ($Name -eq 'SFC') { Set-Content (Join-Path $script:runDirectory 'SFC.txt') $script:sfcOutput }
             return $code
         }
         Mock Repair-Volume { $script:cleanRepairStatus }
@@ -160,6 +161,27 @@ Describe 'Health gate behavior' {
         Should -Invoke Remove-AgedTemporaryFile -Times 0 -Exactly
         Should -Invoke Clear-RecycleBin -Times 0 -Exactly
         Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
+    }
+
+    It 'blocks component cleanup for <Condition>' -ForEach @(
+        @{ Condition = 'SFC corruption'; SfcText = 'Windows Resource Protection found corrupt files.'; DiskExit = 0; NoVolumes = $false; PriorFailure = $false }
+        @{ Condition = 'CHKDSK review code 1'; SfcText = 'Windows Resource Protection did not find any integrity violations.'; DiskExit = 1; NoVolumes = $false; PriorFailure = $false }
+        @{ Condition = 'CHKDSK review code 2'; SfcText = 'Windows Resource Protection did not find any integrity violations.'; DiskExit = 2; NoVolumes = $false; PriorFailure = $false }
+        @{ Condition = 'no checkable volume'; SfcText = 'Windows Resource Protection did not find any integrity violations.'; DiskExit = 0; NoVolumes = $true; PriorFailure = $false }
+        @{ Condition = 'failed essential inventory'; SfcText = 'Windows Resource Protection did not find any integrity violations.'; DiskExit = 0; NoVolumes = $false; PriorFailure = $true }
+    ) {
+        $script:sfcOutput = $SfcText
+        $script:diskCode = $DiskExit
+        if ($NoVolumes) { $report.VolumesBefore = @() }
+        if ($PriorFailure) { $report.Results.Add([pscustomobject]@{ Step = 'Storage'; Status = 'Failed'; Detail = 'Fixture inventory failure' }) }
+        { Invoke-ModeFixture -Mode Health -ComponentCleanup } | Should -Throw '*Component cleanup requires completed health checks*'
+        $nativeCalls | Should -Not -Contain 'ComponentCleanup'
+    }
+
+    It 'allows component cleanup after completed healthy checks' {
+        Invoke-ModeFixture -Mode Health -ComponentCleanup
+        $nativeCalls | Should -Contain 'ComponentCleanup'
+        $nativeCalls.IndexOf('ComponentCleanup') | Should -BeGreaterThan $nativeCalls.IndexOf('CHKDSK-C')
     }
 
     It 'keeps cleanup locked after a successful SystemRepair and asks for a normal health check' {
