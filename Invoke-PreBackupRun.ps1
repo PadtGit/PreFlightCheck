@@ -94,7 +94,10 @@ try {
     if (-not $healthReady) { throw 'HEALTH REVIEW REQUIRED: open the health report, resolve its review conditions, then run normal Windows health checks before cleanup.' }
 
     [void](Invoke-RunStep -Name '03-WinGetPreview' -Arguments @('-Mode','Updates'))
-    [void](Invoke-RunStep -Name '04-CleanupPreview' -Arguments @('-Mode','Clean','-MinimumAgeDays',[string]$MinimumAgeDays,'-WhatIf'))
+    $previewArguments = @('-Mode','Clean','-MinimumAgeDays',[string]$MinimumAgeDays,'-WhatIf')
+    if ($EmptyRecycleBin) { $previewArguments += '-EmptyRecycleBin' }
+    if ($ClearDeliveryCache) { $previewArguments += '-ClearDeliveryCache' }
+    [void](Invoke-RunStep -Name '04-CleanupPreview' -Arguments $previewArguments)
 
     $cleanupArguments = @('-Mode','Clean','-MinimumAgeDays',[string]$MinimumAgeDays,'-MaintenanceWindowConfirmed')
     if ($EmptyRecycleBin) { $cleanupArguments += '-EmptyRecycleBin' }
