@@ -104,6 +104,8 @@ The individual command-line routines remain available for attended troubleshooti
 
    The default cleanup only removes regular files from the current user's Temp folder and Windows Temp when both their creation and modification dates are more than 14 days old. It does not follow links or delete folders. Recycle Bin and Delivery Optimization cleanup require their own switches because their contents may still be useful.
 
+   Temporary-file deletion verifies the opened file's resolved path, age, and size at the deletion decision while holding its parent directories against data writes and rename operations. Busy files and paths that cannot be verified are left alone. Native deletion accepts local drive paths; redirected, network, and alternate-stream paths are rejected.
+
    Component cleanup is optional and runs only after a healthy or successfully repaired DISM result. It uses Microsoft's supported component cleanup operation without the irreversible base-reset option:
 
    ```powershell

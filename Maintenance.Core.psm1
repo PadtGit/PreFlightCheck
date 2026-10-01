@@ -192,26 +192,42 @@ function Get-AgedTemporaryFile {
     }
 }
 
-function Remove-TemporaryFileByHandle {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The exported Remove-AgedTemporaryFile caller performs the ShouldProcess check immediately before invoking this internal handle-level deletion helper.')]
+function Initialize-TemporaryFileNativeType {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
+    param()
     if ($null -eq ('PreBackup.NativeFile' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 namespace PreBackup {
     public static class NativeFile {
         private const uint Delete = 0x00010000;
+        private const uint ReadAttributes = 0x00000080;
+        // Attribute-only opens do not participate in Windows data-access sharing
+        // checks. Include read/list access so denying write/delete sharing is effective.
+        private const uint ReadDataOrListDirectory = 0x00000001;
         private const uint ShareRead = 0x00000001;
-        private const uint ShareWrite = 0x00000002;
-        private const uint ShareDelete = 0x00000004;
         private const uint OpenExisting = 3;
         private const uint OpenReparsePoint = 0x00200000;
+        private const uint BackupSemantics = 0x02000000;
+        private const uint DirectoryAttribute = 0x00000010;
+        private const uint ReparseAttribute = 0x00000400;
         private const int FileDispositionInfoEx = 21;
         private const uint DeleteFlag = 0x00000001;
         private const uint IgnoreReadonlyFlag = 0x00000010;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileTime { public uint Low, High; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileInformation {
+            public uint Attributes;
+            public FileTime Creation, Access, Write;
+            public uint VolumeSerial, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+        }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
@@ -219,22 +235,107 @@ namespace PreBackup {
         private static extern bool SetFileInformationByHandle(IntPtr handle, int infoClass, ref uint info, uint size);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(IntPtr handle, out FileInformation information);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandle(IntPtr handle, StringBuilder path, uint size, uint flags);
 
-        public static void DeleteByHandle(string path) {
-            IntPtr handle = CreateFile(path, Delete, ShareRead | ShareWrite | ShareDelete, IntPtr.Zero, OpenExisting, OpenReparsePoint, IntPtr.Zero);
+        private static IntPtr Open(string path, uint access) {
+            // Deny concurrent data writers and delete/rename handles. Keep every ancestor
+            // open until the file decision and deletion finish, including on errors.
+            IntPtr handle = CreateFile(path, access, ShareRead, IntPtr.Zero, OpenExisting, OpenReparsePoint | BackupSemantics, IntPtr.Zero);
             if (handle == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return handle;
+        }
+
+        private static FileInformation Inspect(IntPtr handle) {
+            FileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return information;
+        }
+
+        private static bool MatchesPath(IntPtr handle, string expected) {
+            StringBuilder path = new StringBuilder(512);
+            uint length = GetFinalPathNameByHandle(handle, path, (uint)path.Capacity, 0);
+            if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (length >= path.Capacity) {
+                path = new StringBuilder(checked((int)length + 1));
+                length = GetFinalPathNameByHandle(handle, path, (uint)path.Capacity, 0);
+                if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (length >= path.Capacity) throw new IOException("Resolved file path changed during validation.");
+            }
+            string resolved = path.ToString();
+            if (resolved.StartsWith(@"\\?\", StringComparison.Ordinal)) resolved = resolved.Substring(4);
+            return String.Equals(resolved.TrimEnd('\\'), expected.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static DateTime Timestamp(FileTime time) {
+            return DateTime.FromFileTimeUtc(checked((long)(((ulong)time.High << 32) | time.Low)));
+        }
+
+        // This read-only entry point exercises the same open/validation path as deletion.
+        public static long GetValidatedLength(string root, string path, DateTime cutoffUtc) {
+            return ProcessCandidate(root, path, cutoffUtc, false);
+        }
+
+        public static long DeleteByHandle(string root, string path, DateTime cutoffUtc) {
+            return ProcessCandidate(root, path, cutoffUtc, true);
+        }
+
+        private static long ProcessCandidate(string root, string path, DateTime cutoffUtc, bool delete) {
+            string rootFull = Path.GetFullPath(root).TrimEnd('\\');
+            string pathFull = Path.GetFullPath(path);
+            string drive = Path.GetPathRoot(pathFull);
+            // Cleanup is limited to local drive paths. Reject device, UNC, alternate
+            // stream and drive-root targets rather than interpreting their aliases.
+            if (drive.Length != 3 || drive[1] != ':' || pathFull.Substring(2).Contains(":")) return -1;
+            if (rootFull.Length <= 3 || !pathFull.StartsWith(rootFull + "\\", StringComparison.OrdinalIgnoreCase)) return -1;
+            List<IntPtr> directories = new List<IntPtr>();
+            IntPtr file = new IntPtr(-1);
             try {
-                uint disposition = DeleteFlag | IgnoreReadonlyFlag;
-                if (!SetFileInformationByHandle(handle, FileDispositionInfoEx, ref disposition, sizeof(uint))) {
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                string parent = Path.GetDirectoryName(pathFull);
+                string current = drive;
+                string[] components = parent.Substring(drive.Length).Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int index = -1; index < components.Length; index++) {
+                    if (index >= 0) current = Path.Combine(current, components[index]);
+                    IntPtr directory = Open(current, ReadAttributes | ReadDataOrListDirectory);
+                    directories.Add(directory);
+                    FileInformation information = Inspect(directory);
+                    if ((information.Attributes & ReparseAttribute) != 0 || (information.Attributes & DirectoryAttribute) == 0 || !MatchesPath(directory, current)) return -1;
                 }
-            } finally { CloseHandle(handle); }
+                file = Open(pathFull, ReadAttributes | ReadDataOrListDirectory | (delete ? Delete : 0));
+                FileInformation candidate = Inspect(file);
+                if ((candidate.Attributes & (DirectoryAttribute | ReparseAttribute)) != 0 || !MatchesPath(file, pathFull)) return -1;
+                DateTime cutoff = cutoffUtc.ToUniversalTime();
+                if (Timestamp(candidate.Creation) >= cutoff || Timestamp(candidate.Write) >= cutoff) return -1;
+                long length = checked((long)(((ulong)candidate.SizeHigh << 32) | candidate.SizeLow));
+                if (delete) {
+                    uint disposition = DeleteFlag | IgnoreReadonlyFlag;
+                    if (!SetFileInformationByHandle(file, FileDispositionInfoEx, ref disposition, sizeof(uint))) throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                return length;
+            } finally {
+                if (file != new IntPtr(-1)) CloseHandle(file);
+                for (int index = directories.Count - 1; index >= 0; index--) CloseHandle(directories[index]);
+            }
         }
     }
 }
 '@ -ErrorAction Stop
     }
-    [PreBackup.NativeFile]::DeleteByHandle($Path)
+}
+
+function Remove-TemporaryFileByHandle {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The exported Remove-AgedTemporaryFile caller performs the ShouldProcess check immediately before invoking this internal handle-level deletion helper.')]
+    [CmdletBinding()]
+    [OutputType([long])]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][datetime]$CutoffUtc
+    )
+    Initialize-TemporaryFileNativeType
+    [PreBackup.NativeFile]::DeleteByHandle($Root, $Path, $CutoffUtc)
 }
 
 function Remove-AgedTemporaryFile {
@@ -253,10 +354,10 @@ function Remove-AgedTemporaryFile {
             $item = Get-Item -LiteralPath $candidate.Path -Force -ErrorAction Stop
             $cutoff = (Get-Date).ToUniversalTime().AddDays(-$MinimumAgeDays)
             if ($item.PSIsContainer -or $item.LastWriteTimeUtc -ge $cutoff -or $item.CreationTimeUtc -ge $cutoff) { $skipped++; continue }
-            $length = $item.Length
-            # Delete through an opened file handle so the final operation targets the
-            # object that was opened, rather than resolving a second path target.
-            Remove-TemporaryFileByHandle -Path $item.FullName
+            # The native boundary locks ancestors and validates the opened file's
+            # resolved path, attributes, timestamps and size before marking it deleted.
+            $length = Remove-TemporaryFileByHandle -Root $Root -Path $item.FullName -CutoffUtc $cutoff
+            if ($length -lt 0) { $skipped++; continue }
             $deleted++; $bytes += $length
         } catch { $failed++; Write-Warning "Skipped $($candidate.Path): $($_.Exception.Message)" }
     }
