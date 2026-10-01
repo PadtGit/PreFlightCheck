@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+
 <#
 .SYNOPSIS
     Conservative Windows 11 pre-backup maintenance and diagnostic reporting.
@@ -12,7 +13,9 @@
     No automatic reboot, snapshot deletion, update cache reset or network reset.
     Reports describe observations, not a guarantee of system or backup integrity.
 .PARAMETER Mode
-    Audit, Clean, Health or Updates. Audit makes no maintenance changes.
+    Audit, Clean, Health, SystemRepair or Updates. Audit makes no maintenance changes.
+    SystemRepair runs an attended disk scan, protected-file repair and image repair;
+    actual repair requires elevation and -MaintenanceWindowConfirmed.
 .PARAMETER MinimumAgeDays
     Both creation and modification dates must be older than this limit (default 14).
 .PARAMETER EmptyRecycleBin
@@ -26,7 +29,7 @@
 .PARAMETER ApplicationId
     Updates mode only: exact WinGet IDs selected by the operator for installation.
 .PARAMETER MaintenanceWindowConfirmed
-    Required for actual Clean, Health or selected application updates: work saved,
+    Required for actual Clean, Health, SystemRepair or selected application updates: work saved,
     no backup or update installation in progress, and a recovery copy is available.
 .PARAMETER OpenUpdatePages
     In Updates mode, open Windows Update and Microsoft Store. Dell is separate.
