@@ -3,7 +3,8 @@
 .SYNOPSIS
     Conservative Windows 11 pre-backup maintenance and diagnostic reporting.
 .DESCRIPTION
-    Defaults to Audit. Clean removes only aged files from known temporary folders.
+    Defaults to Audit. Clean verifies Windows health before removing aged files
+    from known temporary folders. Clean previews do not run health diagnostics.
     Health runs diagnostics; repairs and component cleanup require separate switches.
     SystemRepair runs the WinUtil-style disk, protected-file and image repair sequence.
     Updates inventories software and offers supported update entry points.
@@ -197,30 +198,6 @@ try {
         if ($report.Disks.Count -eq 0 -or @($report.Disks | Where-Object { $_.HealthStatus -ne 'Healthy' }).Count -gt 0) { throw 'Disk health is unavailable or abnormal; protect data before maintenance.' }
         if ($report.VolumesBefore.Count -eq 0 -or @($report.VolumesBefore | Where-Object { $_.DriveType -eq 'Fixed' -and $_.HealthStatus -ne 'Healthy' }).Count -gt 0) { throw 'Volume health is unavailable or abnormal; protect data before maintenance.' }
     }
-    if ($Mode -eq 'Clean') {
-        foreach ($root in $tempRoots) {
-            if ($PSCmdlet.ShouldProcess($root, "Remove only regular temporary files older than $MinimumAgeDays days")) {
-                $cleanupWarnings = @()
-                Write-Information -MessageData "[RUNNING] TempCleanup: Cleaning eligible files in $root..." -InformationAction Continue
-                $cleanupResult = Remove-AgedTemporaryFile -Root $root -MinimumAgeDays $MinimumAgeDays -Confirm:$false -WarningVariable cleanupWarnings
-                $report.Cleanup += $cleanupResult
-                $cleanupStatus = 'Completed'
-                if ($cleanupResult.Failed -gt 0 -or $cleanupWarnings.Count -gt 0) { $cleanupStatus = 'Review' }
-                Add-Result -Step TempCleanup -Status $cleanupStatus -Detail ($cleanupResult | ConvertTo-Json -Compress)
-                if ($cleanupWarnings.Count -gt 0) { Add-Result -Step TempCleanupWarnings -Status Review -Detail ($cleanupWarnings -join [Environment]::NewLine) }
-            }
-        }
-        if ($EmptyRecycleBin -and $PSCmdlet.ShouldProcess('Current user Recycle Bin on all drives', 'Permanently empty reviewed contents')) {
-            Write-Information -MessageData '[RUNNING] RecycleBin: Emptying the reviewed Recycle Bin...' -InformationAction Continue
-            Clear-RecycleBin -Force -ErrorAction Stop
-            Add-Result -Step RecycleBin -Status Completed -Detail 'Current user Recycle Bin emptied.'
-        }
-        if ($ClearDeliveryCache -and $PSCmdlet.ShouldProcess('Delivery Optimization cache', 'Delete cached delivery files')) {
-            Write-Information -MessageData '[RUNNING] DeliveryCache: Clearing Delivery Optimization cache...' -InformationAction Continue
-            Delete-DeliveryOptimizationCache -Force -ErrorAction Stop
-            Add-Result -Step DeliveryCache -Status Completed -Detail 'Delivery Optimization cache cleared.'
-        }
-    }
     if ($Mode -eq 'SystemRepair') {
         $report.HealthReady = $false
         if ($PSCmdlet.ShouldProcess('Windows system', 'Run WinUtil-style system corruption scan and repair')) {
@@ -245,7 +222,7 @@ try {
             Add-Result -Step HealthGate -Status Review -Detail 'Cleanup remains locked. Review the repair logs, restart if requested, then explicitly run Windows health checks before cleanup.'
         }
     }
-    if ($Mode -eq 'Health') {
+    if ($Mode -eq 'Health' -or ($Mode -eq 'Clean' -and -not $WhatIfPreference)) {
         $report.HealthReady = $false
         $analysisCompleted = $false
         $integrityCompleted = $false
@@ -372,6 +349,33 @@ try {
             @($report.Results | Where-Object { $_.Status -in @('Review','Failed') }).Count -eq 0
         if ($report.HealthReady) { Add-Result -Step HealthGate -Status Completed -Detail 'Health checks passed the cleanup gate for this session.' }
         elseif ($RepairWindows) { Add-Result -Step HealthGate -Status Review -Detail 'Cleanup remains locked. Review the repair logs, restart if requested, then explicitly run Windows health checks before cleanup.' }
+    }
+    if ($Mode -eq 'Clean') {
+        if (-not $WhatIfPreference -and -not $report.HealthReady) {
+            throw 'HEALTH REVIEW REQUIRED: cleanup is blocked. Review the health results, resolve repair or restart conditions, then retry cleanup.'
+        }
+        foreach ($root in $tempRoots) {
+            if ($PSCmdlet.ShouldProcess($root, "Remove only regular temporary files older than $MinimumAgeDays days")) {
+                $cleanupWarnings = @()
+                Write-Information -MessageData "[RUNNING] TempCleanup: Cleaning eligible files in $root..." -InformationAction Continue
+                $cleanupResult = Remove-AgedTemporaryFile -Root $root -MinimumAgeDays $MinimumAgeDays -Confirm:$false -WarningVariable cleanupWarnings
+                $report.Cleanup += $cleanupResult
+                $cleanupStatus = 'Completed'
+                if ($cleanupResult.Failed -gt 0 -or $cleanupWarnings.Count -gt 0) { $cleanupStatus = 'Review' }
+                Add-Result -Step TempCleanup -Status $cleanupStatus -Detail ($cleanupResult | ConvertTo-Json -Compress)
+                if ($cleanupWarnings.Count -gt 0) { Add-Result -Step TempCleanupWarnings -Status Review -Detail ($cleanupWarnings -join [Environment]::NewLine) }
+            }
+        }
+        if ($EmptyRecycleBin -and $PSCmdlet.ShouldProcess('Current user Recycle Bin on all drives', 'Permanently empty reviewed contents')) {
+            Write-Information -MessageData '[RUNNING] RecycleBin: Emptying the reviewed Recycle Bin...' -InformationAction Continue
+            Clear-RecycleBin -Force -ErrorAction Stop
+            Add-Result -Step RecycleBin -Status Completed -Detail 'Current user Recycle Bin emptied.'
+        }
+        if ($ClearDeliveryCache -and $PSCmdlet.ShouldProcess('Delivery Optimization cache', 'Delete cached delivery files')) {
+            Write-Information -MessageData '[RUNNING] DeliveryCache: Clearing Delivery Optimization cache...' -InformationAction Continue
+            Delete-DeliveryOptimizationCache -Force -ErrorAction Stop
+            Add-Result -Step DeliveryCache -Status Completed -Detail 'Delivery Optimization cache cleared.'
+        }
     }
     if ($Mode -eq 'Updates') {
         Write-Information -MessageData '[RUNNING] SoftwareInventory: Reading installed application information...' -InformationAction Continue

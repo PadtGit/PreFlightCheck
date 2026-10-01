@@ -60,7 +60,7 @@ Selected actions use the exact IDs you choose. **Upgrade all applications** runs
 3. In the dashboard, choose **Run pre-backup sequence**. It runs System Review and Windows Health before any cleanup. If Windows repair or a restart is required, it stops and clearly blocks cleanup.
 4. After either **Repair Windows** or **System Corruption Scan**, review the logs and restart when requested. Then explicitly run **Windows health → Run health checks**, or begin a new guided run that performs that normal check. Repair completion never unlocks cleanup. CHKDSK exit codes 1 and 2 require review. The successful guided sequence previews application updates and cleanup, performs the confirmed cleanup, and finishes with another System Review.
 
-The individual command-line routines remain available for attended troubleshooting. Run health checks before updates and cleanup:
+The individual command-line routines remain available for attended troubleshooting. Run health checks before updates and cleanup. Every actual `Clean` invocation also repeats the normal Windows and file-system health checks immediately before deletion, including dashboard and guided cleanup. Review, repair, restart, or failed-check results block all cleanup actions. `Clean -WhatIf` remains a preview and does not run these health diagnostics.
 
 5. Run read-only Windows and file-system health checks:
 
