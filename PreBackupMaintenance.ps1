@@ -305,6 +305,11 @@ try {
         }
         if ($ComponentCleanup -and $PSCmdlet.ShouldProcess('Windows component store', 'Remove superseded components; bypass normal cleanup grace period')) {
             if (-not $componentHealthy) { throw 'Component cleanup requires an explicit healthy or repaired DISM conclusion in this run. Review the log.' }
+            if (-not $analysisCompleted -or -not $integrityCompleted -or -not $volumeChecksCompleted -or
+                $report.RepairRecommended -or $report.RestartRequired -or
+                @($report.Results | Where-Object { $_.Status -in @('Review','Failed') }).Count -gt 0) {
+                throw 'Component cleanup requires completed health checks without repair, restart, review, or failure conditions. Review the health results before cleanup.'
+            }
             Write-Information -MessageData '[RUNNING] RestartBeforeCleanup: Checking restart state...' -InformationAction Continue
             $restartBeforeCleanup = Get-PendingRestartState
             if ($restartBeforeCleanup.Pending -or $restartBeforeCleanup.Unknown.Count -gt 0) { throw 'Restart state changed during health work. Review before component cleanup.' }
