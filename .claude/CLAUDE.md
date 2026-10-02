@@ -5,7 +5,8 @@
 
 ## Testing
 
-- Full suite: run the `New-PesterConfiguration` block in AGENTS.md from the repo root in `pwsh`.
+- Full CI-equivalent check: `pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1` (the `pfc-verify` skill); `-SkipAnalysis` for Pester + PS5.1 parse only.
+- The Stop hook runs that `-SkipAnalysis` form automatically (~1.5 min) when `.ps1`/`.psm1`/`.psd1` files or skills differ from `main`.
 - Single file: `Invoke-Pester -Path ./tests/Correctness.Tests.ps1 -Output Detailed`.
 - Single test: add `-FullNameFilter '*part of test name*'`.
 - Tests mock all maintenance actions; never run real cleanup/updates to test.

@@ -9,6 +9,9 @@
 - Retry a contradictory CHKDSK RAW result through the supported read-only volume scan, and confirm transient Component Servicing restart markers before stopping a guided run.
 - Add shared agent instructions and matching repository skills for Codex and Claude Code, with a test that detects drift between the skill copies.
 - Add a Claude Code hook that blocks live maintenance entry points without `-WhatIf`.
+- Add `tools/Invoke-LocalVerify.ps1` and the `pfc-verify` skill to run the CI checks locally (Windows PowerShell 5.1 parse, Pester, full analyzer) with a per-step summary.
+- Add Claude Code hooks that run the PS5.1 parse and Pester before Claude finishes a turn with changed scripts, and that copy skill edits to the Codex copy while refusing direct edits to it.
+- Read dashboard fixture output as UTF-8 in tests so they pass from consoles using an OEM code page such as 850.
 - Parse PowerShell 5.1 scripts with Windows PowerShell in CI and add monthly updates for pinned GitHub Actions.
 - Align contributor and release documentation with the agent setup and published v0.4.2 release.
 

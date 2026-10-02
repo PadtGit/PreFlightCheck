@@ -27,12 +27,12 @@ Files marked `#Requires -Version 5.1` must parse under Windows PowerShell 5.1: n
 Run from the repo root in PowerShell 7 (CI pins Pester 6.2.0 and PSScriptAnalyzer 1.25.0):
 
 ```powershell
-$config = New-PesterConfiguration; $config.Run.Path = './tests'; $config.Run.Exit = $true
-$config.TestRegistry.Enabled = $false; Invoke-Pester -Configuration $config
-./tools/Invoke-FullScriptAnalysis.ps1
+pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1
 ```
 
-CI ([`.github/workflows/verify.yml`](.github/workflows/verify.yml)) also parses every PS5.1 file with Windows PowerShell.
+It runs the steps of CI ([`.github/workflows/verify.yml`](.github/workflows/verify.yml)) in order: Windows PowerShell 5.1
+parse of every PS5.1 file, Pester, then `tools/Invoke-FullScriptAnalysis.ps1` with retries. It exits 0 only when every
+step passed. Add `-SkipAnalysis` while iterating; run it without that switch before opening a PR.
 Releases: bump `VERSION`, update `CHANGELOG.md`, publish a GitHub release tagged `v<VERSION>`;
 [`.github/workflows/release-archive.yml`](.github/workflows/release-archive.yml) attaches the ZIP.
 
@@ -46,6 +46,7 @@ Apply these according to the request. Each skill's `SKILL.md` has the details.
 | `ps-project-features` | New functions, checks, dashboard tasks |
 | `ps-project-ux` | Console output and dashboard presentation |
 | `powershell-security-review` | Security review/hardening; ends with its strict analyzer check |
+| `pfc-verify` | Running the CI checks locally before finishing or opening a PR |
 | `pfc-release` | Cutting a release (user-invoked: `/pfc-release`) |
 
 Install locations:
@@ -55,10 +56,16 @@ Install locations:
 
 Edit `.claude/skills` first, then copy the change to `.agents/skills`:
 `Copy-Item .claude/skills/* .agents/skills/ -Recurse -Force`. `tests/AgentSkills.Tests.ps1`
-fails CI when the two copies differ.
+fails CI when the two copies differ. In Claude Code the `Sync-AgentSkill.ps1` hook does the copy (see below);
+deletions and renames still need both copies changed by hand.
 
-Claude Code also loads `.claude/settings.json`, whose `.claude/hooks/Block-LiveMaintenance.ps1` hook refuses
-shell commands that would run a maintenance entry point without `-WhatIf`.
-`.claude/hooks/Test-EditedScript.ps1` runs after every edit to a `.ps1`/`.psm1`/`.psd1` file (PS5.1 parse + PSScriptAnalyzer,
-release-blocking findings only) and exits 2 on problems; fix them before continuing. It skips `PSUseCompatibleCommands`/`Types`,
-which only `tools/Invoke-FullScriptAnalysis.ps1` enforces. Keep its `$advisoryRules` in sync with that script.
+Claude Code also loads `.claude/settings.json`, which runs these hooks from `.claude/hooks/`:
+
+- `Block-LiveMaintenance.ps1` refuses shell commands that would run a maintenance entry point without `-WhatIf`.
+- `Test-EditedScript.ps1` runs after every edit to a `.ps1`/`.psm1`/`.psd1` file (PS5.1 parse + PSScriptAnalyzer,
+  release-blocking findings only) and exits 2 on problems; fix them before continuing. It skips `PSUseCompatibleCommands`/`Types`,
+  which only `tools/Invoke-FullScriptAnalysis.ps1` enforces. Keep its `$advisoryRules` in sync with that script.
+- `Sync-AgentSkill.ps1` copies each file edited under `.claude/skills` to `.agents/skills` and refuses direct edits to `.agents/skills`.
+- `Invoke-StopVerification.ps1` runs `tools/Invoke-LocalVerify.ps1 -SkipAnalysis` when Claude stops with PowerShell files or skills
+  changed against `main`, and blocks the stop on failures. A passing state is cached until those files change; after three
+  blocked stops in a row it lets Claude stop and warns the user.
