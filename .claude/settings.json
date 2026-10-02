@@ -11,8 +11,11 @@
       "Bash(readlink:*)",
       "Bash(pwsh -NoProfile -Command Invoke-Pester:*)",
       "Bash(pwsh -NoProfile -File ./tools/Invoke-FullScriptAnalysis.ps1:*)",
+      "Bash(pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1:*)",
       "PowerShell(Invoke-Pester:*)",
-      "PowerShell(./tools/Invoke-FullScriptAnalysis.ps1:*)"
+      "PowerShell(./tools/Invoke-FullScriptAnalysis.ps1:*)",
+      "PowerShell(./tools/Invoke-LocalVerify.ps1:*)",
+      "PowerShell(pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1:*)"
     ]
   },
   "hooks": {
@@ -25,6 +28,15 @@
             "command": "pwsh -NoLogo -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/Block-LiveMaintenance.ps1\""
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoLogo -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/Sync-AgentSkill.ps1\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -35,6 +47,21 @@
             "type": "command",
             "command": "pwsh -NoLogo -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/Test-EditedScript.ps1\"",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "pwsh -NoLogo -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/Sync-AgentSkill.ps1\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoLogo -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/Invoke-StopVerification.ps1\"",
+            "timeout": 300
           }
         ]
       }

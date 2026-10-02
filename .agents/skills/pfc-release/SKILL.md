@@ -16,12 +16,11 @@ Prepare a release on a branch, merge through a PR, then publish. Ask Bob which s
 3. Move the `Unreleased` entries into a new `## X.Y.Z - YYYY-MM-DD` section at the top of
    `CHANGELOG.md`, with user-facing bullets in the existing past-tense, behavior-first style.
    Summarize from `git log vPREV..HEAD`, then leave an empty `## Unreleased` section above it.
-4. Verify locally in PowerShell 7 (same versions as CI: Pester 6.2.0, PSScriptAnalyzer 1.25.0):
+4. Verify locally in PowerShell 7 (same versions as CI: Pester 6.2.0, PSScriptAnalyzer 1.25.0; see the
+   `pfc-verify` skill), then build the archive:
 
    ```powershell
-   $config = New-PesterConfiguration; $config.Run.Path = './tests'; $config.Run.Exit = $true
-   $config.TestRegistry.Enabled = $false; Invoke-Pester -Configuration $config
-   ./tools/Invoke-FullScriptAnalysis.ps1
+   pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1
    ./tools/New-ReleaseArchive.ps1 -OutputDirectory "$env:TEMP\pfc-release-check"
    ```
 

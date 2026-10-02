@@ -425,7 +425,15 @@ Describe 'Dashboard state and live activity' {
         @{ Fixture = 'finished'; State = 'Review'; ExpectedOperation = 'Finished — see saved result'; ExpectedProgress = 'Result saved'; ExpectedActions = 'enabled' }
     ) {
         $imagePath = Join-Path $TestDrive "$Fixture-dashboard.png"
-        $output = & (Get-Process -Id $PID).Path -NoLogo -NoProfile -STA -File $dashboardPath -UiTestOutput $imagePath -UiState $State 2>&1 | Out-String
+        # The child writes with the shared console code page; under an OEM page such as 850 the
+        # em dash in the finished fixture degrades to '-', so read its output as UTF-8.
+        $previousEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $output = & (Get-Process -Id $PID).Path -NoLogo -NoProfile -STA -File $dashboardPath -UiTestOutput $imagePath -UiState $State 2>&1 | Out-String
+        } finally {
+            [Console]::OutputEncoding = $previousEncoding
+        }
 
         $LASTEXITCODE | Should -Be 0
         (Get-Item -LiteralPath $imagePath).Length | Should -BeGreaterThan 1000
