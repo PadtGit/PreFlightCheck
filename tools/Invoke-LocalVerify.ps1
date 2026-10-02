@@ -51,8 +51,11 @@ if ($LASTEXITCODE -ne 0)
 }
 else
 {
+    # --cached still lists files deleted or renamed in the working tree but not yet staged; skip them.
     $ps51Files = @($inventory | Where-Object {
-            Select-String -LiteralPath (Join-Path -Path $repositoryRoot -ChildPath $_) -Pattern '^#Requires -Version 5\.1' -Quiet
+            $path = Join-Path -Path $repositoryRoot -ChildPath $_
+            (Test-Path -LiteralPath $path -PathType Leaf) -and
+            (Select-String -LiteralPath $path -Pattern '^#Requires -Version 5\.1' -Quiet)
         })
     if ($ps51Files.Count -eq 0)
     {
