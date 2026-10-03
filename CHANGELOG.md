@@ -2,18 +2,25 @@
 
 ## Unreleased
 
-- Require a successful dashboard cleanup preview matching the selected age and optional actions before applying cleanup; include Recycle Bin and Delivery Optimization selections in dashboard and guided previews.
-- Block component-store cleanup when earlier integrity, file-system, or essential inventory checks are incomplete or require review, repair, or restart.
-- Require normal Windows and file-system health checks in every actual cleanup invocation, blocking all cleanup actions on health review, repair, restart, or failure; keep cleanup previews available without health scans.
-- Show the saved stopping reason and nearby tool output directly in dashboard results, with expandable report findings and an exit-code legend on every task page that needs review or action; keep successful results concise.
-- Retry a contradictory CHKDSK RAW result through the supported read-only volume scan, and confirm transient Component Servicing restart markers before stopping a guided run.
-- Add shared agent instructions and matching repository skills for Codex and Claude Code, with a test that detects drift between the skill copies.
-- Add a Claude Code hook that blocks live maintenance entry points without `-WhatIf`.
-- Add `tools/Invoke-LocalVerify.ps1` and the `pfc-verify` skill to run the CI checks locally (Windows PowerShell 5.1 parse, Pester, full analyzer) with a per-step summary.
-- Add Claude Code hooks that run the PS5.1 parse and Pester before Claude finishes a turn with changed scripts, and that copy skill edits to the Codex copy while refusing direct edits to it.
+## 0.4.3 - 2026-10-03
+
+- Made dashboard navigation follow the displayed page with a selected outline and leading marker; kept the selected item visible and keyboard focus distinct from selection.
+- Clarified Windows repair scan wording, associated each changing input label, added accessible activity names, and directed idle operators toward the guided pre-backup run.
+- Standardized dashboard body text and control sizes, and kept inputs reachable at the minimum window size with safe preview and fixture checks.
+- Validated temporary cleanup candidates through protected file handles before deleting them, preserving age and reparse-point safeguards.
+
+- Required a successful dashboard cleanup preview matching the selected age and optional actions before applying cleanup; included Recycle Bin and Delivery Optimization selections in dashboard and guided previews.
+- Blocked component-store cleanup when earlier integrity, file-system, or essential inventory checks are incomplete or require review, repair, or restart.
+- Required normal Windows and file-system health checks in every actual cleanup invocation, blocking all cleanup actions on health review, repair, restart, or failure; kept cleanup previews available without health scans.
+- Showed the saved stopping reason and nearby tool output directly in dashboard results, with expandable report findings and an exit-code legend on every task page that needs review or action; kept successful results concise.
+- Retried a contradictory CHKDSK RAW result through the supported read-only volume scan, and confirmed transient Component Servicing restart markers before stopping a guided run.
+- Added shared agent instructions and matching repository skills for Codex and Claude Code, with a test that detects drift between the skill copies.
+- Added a Claude Code hook that blocks live maintenance entry points without `-WhatIf`.
+- Added `tools/Invoke-LocalVerify.ps1` and the `pfc-verify` skill to run the CI checks locally (Windows PowerShell 5.1 parse, Pester, full analyzer) with a per-step summary; excluded unstaged deletions from the parse inventory.
+- Added Claude Code hooks that run the PS5.1 parse and Pester before Claude finishes a turn with changed scripts, and that copy skill edits to the Codex copy while refusing direct edits to it.
 - Read dashboard fixture output as UTF-8 in tests so they pass from consoles using an OEM code page such as 850.
-- Parse PowerShell 5.1 scripts with Windows PowerShell in CI and add monthly updates for pinned GitHub Actions.
-- Align contributor and release documentation with the agent setup and published v0.4.2 release.
+- Parsed PowerShell 5.1 scripts with Windows PowerShell in CI and added monthly updates for pinned GitHub Actions.
+- Aligned contributor and release documentation with the agent setup and published v0.4.2 release.
 
 ## 0.4.2 - 2026-09-25
 
@@ -74,4 +81,3 @@
 - Added explicit checks that the default workflow does not delete shadow copies or reset the Windows Update cache.
 - Added verification for `ShouldProcess`, `-WhatIf`, terminating orchestration errors, native exit-code handling, AC-line detection, and reparse-point-aware cleanup.
 - Kept the existing safe `Audit` default and explicit cleanup/repair modes.
-

@@ -85,7 +85,7 @@ Describe 'PreBackupMaintenance safety contract' {
     It 'exposes the new dashboard actions without removing existing pages' {
         $dashboardText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Start-Maintenance.ps1') -Raw
         $workerText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Invoke-GuiTask.ps1') -Raw
-        $dashboardText | Should -Match 'System Corruption Scan - Run'
+        $dashboardText | Should -Match 'Windows repair scan'
         $dashboardText | Should -Match 'Install/Upgrade Applications'
         $dashboardText | Should -Match 'Uninstall Applications'
         $dashboardText | Should -Match 'Upgrade all Applications'

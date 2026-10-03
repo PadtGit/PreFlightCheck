@@ -219,6 +219,45 @@ Describe 'Interactive result details' {
     }
 }
 
+Describe 'Dashboard navigation and input accessibility' {
+    It 'selects only the displayed page and follows the changing input label on every page' {
+        $imagePath = Join-Path $TestDrive 'navigation-dashboard.png'
+        $output = & (Get-Process -Id $PID).Path -NoLogo -NoProfile -STA -File $dashboardPath -UiTestOutput $imagePath -UiPage Applications 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 0
+        $output | Should -Match 'Navigation selection: seven pages validated'
+        $output | Should -Match 'Input labels: three pages validated'
+        $output | Should -Match 'Activity accessible names: validated'
+    }
+
+    It 'keeps the <Page> input reachable at the minimum dashboard size' -ForEach @(
+        @{ Page = 'Runbook' }, @{ Page = 'Applications' }, @{ Page = 'Cleanup' }
+    ) {
+        $probePath = Join-Path $TestDrive "$Page-minimum.ps1"
+        $imagePath = Join-Path $TestDrive "$Page-minimum.png"
+        @'
+param([string]$DashboardPath, [string]$ImagePath, [string]$Page)
+$ErrorActionPreference = 'Stop'
+$requestedPage = $Page
+. $DashboardPath -UiTestOutput $ImagePath -UiPage $requestedPage
+$surface = $window.Content
+$surface.Measure([Windows.Size]::new(900,660))
+$surface.Arrange([Windows.Rect]::new(0,0,900,660))
+$surface.UpdateLayout()
+if ($Options.Parent.ActualHeight -lt $ValueInput.ActualHeight) { throw 'Minimum window hides the input viewport.' }
+$ValueInput.BringIntoView()
+$surface.UpdateLayout()
+$point = $ValueInput.TransformToAncestor($Options.Parent).Transform([Windows.Point]::new(0,0))
+if ($point.Y -lt 0 -or ($point.Y + $ValueInput.ActualHeight) -gt $Options.Parent.ActualHeight) { throw 'Input cannot be scrolled fully into view.' }
+Write-Output 'Minimum options viewport validated.'
+'@ | Set-Content -LiteralPath $probePath -Encoding UTF8
+        $output = & (Get-Process -Id $PID).Path -NoLogo -NoProfile -STA -File $probePath -DashboardPath $dashboardPath -ImagePath $imagePath -Page $Page 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 0 -Because $output
+        $output | Should -Match 'Minimum options viewport validated'
+    }
+}
+
 Describe 'Dashboard state and live activity' {
     It 'gives every operator state a readable label and supplementary color' {
         $expected = @{
