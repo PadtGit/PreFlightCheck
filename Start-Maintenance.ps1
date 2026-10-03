@@ -48,20 +48,29 @@ $script:taskStartedAt = $null
 $script:liveActivityState = $null
 $script:detailsVisible = $false
 [xml]$layout = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="830" MinWidth="940" MinHeight="700" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Pre-Backup Maintenance" Width="1120" Height="830" MinWidth="940" MinHeight="700" FontSize="14" Background="#111A26" Foreground="#E9F1F7" WindowStartupLocation="CenterScreen">
 <Window.Resources>
-<Style TargetType="Button"><Setter Property="Padding" Value="10,5"/><Setter Property="Margin" Value="0,0,8,4"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
+<Style x:Key="KeyboardFocusOutline"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Rectangle Margin="-3" Stroke="#F3C87F" StrokeThickness="2" StrokeDashArray="2,1"/></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType="Button">
+<Setter Property="Padding" Value="12,6"/><Setter Property="MinHeight" Value="36"/><Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Background" Value="#2A3C50"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+<Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+<Grid><Border x:Name="ButtonSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3"><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/></Border><Border x:Name="KeyboardFocus" Margin="3" BorderBrush="#F3C87F" BorderThickness="2" CornerRadius="2" Visibility="Collapsed" IsHitTestVisible="False"/></Grid>
+<ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonSurface" Property="BorderBrush" Value="#ADC0D2"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonSurface" Property="Opacity" Value="0.8"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="KeyboardFocus" Property="Visibility" Value="Visible"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers>
+</ControlTemplate></Setter.Value></Setter>
+</Style>
+<Style x:Key="NavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="BorderThickness" Value="4,1,1,1"/><Style.Triggers><Trigger Property="Tag" Value="Selected"><Setter Property="Background" Value="#14756C"/><Setter Property="BorderBrush" Value="#74DCC7"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="AutomationProperties.ItemStatus" Value="Current page"/></Trigger></Style.Triggers></Style>
 <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
-<Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E9F1F7"/><Setter Property="Margin" Value="0,5,0,8"/></Style>
+<Style TargetType="TextBox"><Setter Property="MinHeight" Value="36"/><Setter Property="Background" Value="#172534"/><Setter Property="Foreground" Value="#E9F1F7"/><Setter Property="CaretBrush" Value="#E9F1F7"/><Setter Property="BorderBrush" Value="#4A6178"/><Setter Property="BorderThickness" Value="2"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/><Style.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="#F3C87F"/></Trigger></Style.Triggers></Style>
+<Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E9F1F7"/><Setter Property="MinHeight" Value="36"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Margin" Value="0,4,0,8"/><Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusOutline}"/></Style>
 </Window.Resources>
-<Grid Margin="20" Background="#111A26"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="320"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<Grid Margin="20" Background="#111A26"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="280"/><RowDefinition Height="*" MinHeight="200"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock Text="PRE-BACKUP MAINTENANCE" FontSize="26" FontWeight="Bold"/><TextBlock x:Name="Session" Foreground="#ADC0D2" Margin="0,6,0,16"/></StackPanel>
 <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="285"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,6,0"><StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,3"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Background="#14756C"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="AuditButton" Content="System review"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="ApplicationsButton" Content="WinGet applications"/><Button x:Name="HealthButton" Content="Windows health"/><Button x:Name="SystemRepairButton" Content="System Corruption Scan - Run"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,4,0,3"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware"/></StackPanel></ScrollViewer>
+<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,6,0"><StackPanel x:Name="Tasks"><TextBlock Text="GUIDED RUN" Foreground="#74DCC7" Margin="0,0,0,4"/><Button x:Name="RunbookButton" Content="Run pre-backup sequence" Style="{StaticResource NavigationButton}"/><TextBlock Text="SYSTEM" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="AuditButton" Content="System review" Style="{StaticResource NavigationButton}"/><TextBlock Text="MAINTENANCE" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="ApplicationsButton" Content="WinGet applications" Style="{StaticResource NavigationButton}"/><Button x:Name="HealthButton" Content="Windows health" Style="{StaticResource NavigationButton}"/><Button x:Name="SystemRepairButton" Content="Windows repair scan" Style="{StaticResource NavigationButton}"/><Button x:Name="CleanupButton" Content="Pre-backup cleanup" Style="{StaticResource NavigationButton}"/><TextBlock Text="DELL — SEPARATE WEEKLY TASK" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="DellButton" Content="Dell drivers &amp; firmware" Style="{StaticResource NavigationButton}"/></StackPanel></ScrollViewer>
 <Grid Grid.Column="1" Margin="20,0,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><TextBlock x:Name="Heading" FontSize="22" FontWeight="Bold"/><TextBlock x:Name="Description" Margin="0,8,0,5"/><TextBlock x:Name="Access" Foreground="#F3C87F" Margin="0,0,0,12"/></StackPanel>
 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Options">
-<TextBlock x:Name="InputLabel"/><TextBox x:Name="ValueInput" Padding="7" Margin="0,4,0,9"/>
+<TextBlock x:Name="InputLabel"/><TextBox x:Name="ValueInput" AutomationProperties.LabeledBy="{Binding ElementName=InputLabel}" Padding="8" Margin="0,4,0,8"/>
 <TextBlock x:Name="SelectionCount" Foreground="#74DCC7" Margin="0,0,0,6"/>
 <StackPanel x:Name="ApplicationActions"><TextBlock Text="ACTIONS" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="InstallUpgradeButton" Content="Install/Upgrade Applications"/><Button x:Name="UninstallButton" Content="Uninstall Applications"/><Button x:Name="UpgradeAllButton" Content="Upgrade all Applications"/><TextBlock Text="SELECTION" Foreground="#74DCC7" Margin="0,4,0,4"/><Button x:Name="ShowInstalledButton" Content="Show Installed Apps"/><Button x:Name="ClearSelectionButton" Content="Clear Selection"/></StackPanel>
 <CheckBox x:Name="OptionOne"/><CheckBox x:Name="OptionTwo"/>
@@ -69,12 +78,16 @@ $script:detailsVisible = $false
 </StackPanel></ScrollViewer>
 <WrapPanel Grid.Row="2"><Button x:Name="Preview" Content="Run review" Background="#14756C"/><Button x:Name="Apply" Content="Apply changes…" Background="#964B38"/></WrapPanel>
 </Grid></Grid>
-<Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="LIVE ACTIVITY / RESULT" Foreground="#74DCC7" FontWeight="Bold" VerticalAlignment="Center"/><Border x:Name="StatusBorder" Grid.Column="1" HorizontalAlignment="Right" Background="#172534" BorderBrush="#4A6178" BorderThickness="1" CornerRadius="3" Padding="9,4"><TextBlock x:Name="Status" Text="IDLE — Ready" Foreground="#ADC0D2" FontWeight="SemiBold"/></Border></Grid><Grid Grid.Row="1" Margin="0,0,0,8"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="CurrentOperation" Text="Current operation: Waiting to start" Foreground="#E9F1F7" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ElapsedTask" Grid.Column="1" Text="Elapsed: 00:00:00" Foreground="#ADC0D2" Margin="16,0,0,0" TextWrapping="NoWrap"/></Grid><Grid Grid.Row="1" Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ProgressBar x:Name="ActivityProgress" Height="7" Minimum="0" Maximum="100" IsIndeterminate="False" Value="0" Foreground="#74DCC7" Background="#172534" BorderBrush="#2D5B68"/><TextBlock x:Name="ActivityProgressText" Grid.Column="1" Text="Ready" Foreground="#ADC0D2" HorizontalAlignment="Right" MinWidth="70" Margin="10,-5,0,0" TextWrapping="NoWrap"/></Grid></Grid><TextBox x:Name="Console" Grid.Row="2" IsReadOnly="True" Background="#080D14" Foreground="#D7E7E1" FontFamily="Consolas" FontSize="13" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Choose a task. Live activity and the final result will appear here."/></Grid>
+<Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="LIVE ACTIVITY / RESULT" Foreground="#74DCC7" FontWeight="Bold" VerticalAlignment="Center"/><Border x:Name="StatusBorder" Grid.Column="1" HorizontalAlignment="Right" Background="#172534" BorderBrush="#4A6178" BorderThickness="1" CornerRadius="3" Padding="9,4"><TextBlock x:Name="Status" Text="IDLE — Ready" Foreground="#ADC0D2" FontWeight="SemiBold"/></Border></Grid><Grid Grid.Row="1" Margin="0,0,0,8"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="CurrentOperation" Text="Current operation: Waiting to start" Foreground="#E9F1F7" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ElapsedTask" Grid.Column="1" Text="Elapsed: 00:00:00" Foreground="#ADC0D2" Margin="16,0,0,0" TextWrapping="NoWrap"/></Grid><Grid Grid.Row="1" Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ProgressBar x:Name="ActivityProgress" AutomationProperties.Name="Current operation progress" Height="7" Minimum="0" Maximum="100" IsIndeterminate="False" Value="0" Foreground="#74DCC7" Background="#172534" BorderBrush="#2D5B68"/><TextBlock x:Name="ActivityProgressText" Grid.Column="1" Text="Ready" Foreground="#ADC0D2" HorizontalAlignment="Right" MinWidth="70" Margin="10,-5,0,0" TextWrapping="NoWrap"/></Grid></Grid><TextBox x:Name="Console" AutomationProperties.Name="Live activity and task result" Grid.Row="2" IsReadOnly="True" Background="#080D14" Foreground="#D7E7E1" FontFamily="Consolas" Padding="10" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Start with the guided pre-backup run, or choose an individual task. Activity and saved results appear here."/></Grid>
 <DockPanel Grid.Row="3" Margin="0,12,0,0"><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button x:Name="ShowDetails" Content="Show details" IsEnabled="False"/><Button x:Name="OpenResults" Content="Open result summary" IsEnabled="False"/><Button x:Name="OpenResultFolder" Content="Open result folder" IsEnabled="False"/><Button x:Name="OpenGuide" Content="Guide"/></StackPanel><TextBlock Text="Detailed output is saved automatically." Foreground="#ADC0D2" VerticalAlignment="Center"/></DockPanel>
 </Grid></Window>
 '@
 $script:window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
 foreach ($name in @('Session','Tasks','RunbookButton','AuditButton','ApplicationsButton','CleanupButton','HealthButton','SystemRepairButton','DellButton','Heading','Description','Access','Options','InputLabel','ValueInput','SelectionCount','ApplicationActions','InstallUpgradeButton','UninstallButton','UpgradeAllButton','ShowInstalledButton','ClearSelectionButton','OptionOne','OptionTwo','NoticeBorder','Notice','Preview','Apply','Console','ShowDetails','OpenResults','OpenResultFolder','OpenGuide','StatusBorder','Status','CurrentOperation','ElapsedTask','ActivityProgress','ActivityProgressText')) { Set-Variable -Name $name -Value $window.FindName($name) -Scope Script }
+$script:navigationButtons = @{
+    Runbook = $RunbookButton; Audit = $AuditButton; Applications = $ApplicationsButton
+    Cleanup = $CleanupButton; Health = $HealthButton; SystemRepair = $SystemRepairButton; Dell = $DellButton
+}
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Session.Text = if ($isAdmin) { 'Administrator session • guided order • one combined session log' } else { 'UI test session • no maintenance will run' }
@@ -152,6 +165,9 @@ function Show-Page {
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')][string]$Page)
     $script:lastPage = $Page
+    foreach ($navigationPage in $script:navigationButtons.Keys) {
+        $script:navigationButtons[$navigationPage].Tag = if ($navigationPage -eq $Page) { 'Selected' } else { $null }
+    }
     $ApplicationActions.Visibility = if ($Page -eq 'Applications') { 'Visible' } else { 'Collapsed' }
     $SelectionCount.Visibility = if ($Page -eq 'Applications') { 'Visible' } else { 'Collapsed' }
     $ValueInput.Visibility = 'Collapsed'; $InputLabel.Visibility = 'Collapsed'; $OptionOne.Visibility = 'Collapsed'; $OptionTwo.Visibility = 'Collapsed'; $NoticeBorder.Visibility = 'Visible'; $Preview.Visibility = 'Visible'; $Apply.Visibility = 'Visible'
@@ -185,8 +201,8 @@ function Show-Page {
             $Notice.Text = 'Run the check first. After repair, review the logs, restart if requested, then explicitly run health checks again to unlock cleanup. No automatic restart or irreversible component base reset occurs.'; $Preview.Content = 'Run health checks'; $Apply.Content = 'Repair Windows…'
         }
         'SystemRepair' {
-            $Heading.Text = 'System Corruption Scan'; $Description.Text = 'Run the WinUtil-style disk, protected-file and Windows image repair sequence.'; $Access.Text = 'Administrator permission required. The scan may repair Windows files and DISM may request a restart.'
-            $Notice.Text = 'Runs chkdsk /scan /perf, sfc /scannow, then dism /online /cleanup-image /restorehealth. Review the logs, restart if requested, then run Windows health checks to unlock cleanup. No automatic restart occurs.'; $Preview.Visibility = 'Collapsed'; $Apply.Content = 'Run corruption scan…'
+            $Heading.Text = 'Windows repair scan'; $Description.Text = 'Check the disk and scan protected Windows files and the Windows image. This scan may repair Windows files.'; $Access.Text = 'Administrator permission required. Repairs may require a restart; review the results before continuing.'
+            $Notice.Text = 'Runs chkdsk /scan /perf, sfc /scannow, then dism /online /cleanup-image /restorehealth. Review the logs, restart if requested, then run Windows health checks to unlock cleanup. No automatic restart occurs.'; $Preview.Visibility = 'Collapsed'; $Apply.Content = 'Run Windows repair scan…'
         }
         'Dell' {
             $Heading.Text = 'Dell drivers and firmware'; $Description.Text = 'Show installed BIOS information and open the official Dell G5 5590 support page.'; $Access.Text = 'Separate weekly, attended review. No update is downloaded or installed.'
@@ -194,6 +210,7 @@ function Show-Page {
         }
     }
     Update-CleanupAvailability
+    $script:navigationButtons[$Page].BringIntoView()
 }
 function Get-CleanupAge {
     [CmdletBinding()]
@@ -422,10 +439,35 @@ $window.Add_ContentRendered({
     $window.Topmost = $true
     [void]$window.Activate()
     $window.Topmost = $false
+    $script:navigationButtons[$script:lastPage].BringIntoView()
 })
 Show-Page -Page $UiPage
 if ($UiTestOutput) {
-    foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')) { Show-Page -Page $page; if ($Heading.Text.Length -eq 0) { throw "Page failed: $page" } }
+    $window.Content.Measure([Windows.Size]::new(1080,790))
+    $window.Content.Arrange([Windows.Rect]::new(0,0,1080,790))
+    $window.Content.UpdateLayout()
+    foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')) {
+        Show-Page -Page $page
+        $window.Content.UpdateLayout()
+        if ($Heading.Text.Length -eq 0) { throw "Page failed: $page" }
+        $selectedPages = @($script:navigationButtons.Keys | Where-Object { $script:navigationButtons[$_].Tag -eq 'Selected' })
+        if ($selectedPages.Count -ne 1 -or $selectedPages[0] -ne $page) { throw "Navigation selection failed: $page" }
+        foreach ($navigationPage in $script:navigationButtons.Keys) {
+            $peer = [Windows.Automation.Peers.ButtonAutomationPeer]::new($script:navigationButtons[$navigationPage])
+            $expectedStatus = if ($navigationPage -eq $page) { 'Current page' } else { '' }
+            if ($peer.GetItemStatus() -ne $expectedStatus) { throw "Navigation accessibility status failed: $navigationPage" }
+        }
+        if ($ValueInput.Visibility -eq 'Visible') {
+            $window.Content.UpdateLayout()
+            # An unshown preview has no automation tree yet; create the label peer first.
+            $labelPeer = [Windows.Automation.Peers.UIElementAutomationPeer]::CreatePeerForElement($InputLabel)
+            $peer = [Windows.Automation.Peers.TextBoxAutomationPeer]::new($ValueInput)
+            if ([Windows.Automation.AutomationProperties]::GetLabeledBy($ValueInput) -ne $InputLabel -or $labelPeer.GetName() -ne $InputLabel.Text -or $peer.GetName() -ne $InputLabel.Text) { throw "Input label association failed: $page" }
+        }
+    }
+    $consolePeer = [Windows.Automation.Peers.TextBoxAutomationPeer]::new($Console)
+    $progressPeer = [Windows.Automation.Peers.ProgressBarAutomationPeer]::new($ActivityProgress)
+    if ($consolePeer.GetName() -ne 'Live activity and task result' -or $progressPeer.GetName() -ne 'Current operation progress') { throw 'Activity accessible names failed.' }
     Show-Page -Page $UiPage
     if ($UiPage -eq 'Cleanup') {
         foreach ($invalid in @('0','6','366','1.5','abc')) { $ValueInput.Text = $invalid; $rejected = $false; try { Get-CleanupAge | Out-Null } catch { $rejected = $true }; if (-not $rejected) { throw "Invalid age accepted: $invalid" } }
@@ -456,5 +498,6 @@ if ($UiTestOutput) {
     $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new(); $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
     $stream = [IO.File]::Create([IO.Path]::GetFullPath($UiTestOutput)); try { $encoder.Save($stream) } finally { $stream.Dispose() }
     $resultActionState = if ($OpenResults.IsEnabled -and $OpenResultFolder.IsEnabled) { 'enabled' } else { 'disabled' }
-    Write-Output "PASS: seven dashboard pages and the $UiState state rendered. $($CurrentOperation.Text); Progress: $($ActivityProgressText.Text); Result actions: $resultActionState. Cleanup input limits were validated. No maintenance ran."
+    Write-Output "PASS: seven dashboard pages and the $UiState state rendered. Navigation selection: seven pages validated; Input labels: three pages validated; Activity accessible names: validated. $($CurrentOperation.Text); Progress: $($ActivityProgressText.Text); Result actions: $resultActionState. No maintenance ran."
+    if ($UiPage -eq 'Cleanup') { Write-Output 'Cleanup input limits were validated.' }
 } else { $timer.Start(); try { [void]$window.ShowDialog() } finally { $timer.Stop() } }

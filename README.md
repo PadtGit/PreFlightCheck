@@ -2,7 +2,7 @@
 
 **Clean system, smaller backup, faster restore.**
 
-Version: [0.4.2](https://github.com/PadtGit/PreFlightCheck/releases/tag/v0.4.2) (released)
+Version: [0.4.3](https://github.com/PadtGit/PreFlightCheck/releases/tag/v0.4.3) (released)
 
 Windows 11 pre-backup maintenance toolkit — integrity checks, disk cleanup, and health reports before your Veeam job runs.
 

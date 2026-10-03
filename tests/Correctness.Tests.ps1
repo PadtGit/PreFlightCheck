@@ -328,6 +328,11 @@ Describe 'Applications preview behavior' {
     It 'exposes a visible preview action that maps to UpdatePreview with no mutation switches' {
         $script:active = $null
         $script:taskStatus = 'Ready'
+        $script:navigationButtons = @{}
+        foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')) {
+            $script:navigationButtons[$page] = [pscustomobject]@{ Tag = $null }
+            $script:navigationButtons[$page] | Add-Member -MemberType ScriptMethod -Name BringIntoView -Value { }
+        }
         foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Status')) {
             Set-Variable -Name $name -Value ([pscustomobject]@{ Visibility = ''; Text = ''; Content = ''; IsChecked = $false; IsEnabled = $true })
         }
@@ -437,6 +442,11 @@ Describe 'Cleanup action availability' {
         $script:taskStatus = 'Ready'
         $script:taskStartedAt = $null
         $script:liveActivityState = $null
+        $script:navigationButtons = @{}
+        foreach ($page in @('Runbook','Audit','Applications','Cleanup','Health','SystemRepair','Dell')) {
+            $script:navigationButtons[$page] = [pscustomobject]@{ Tag = $null }
+            $script:navigationButtons[$page] | Add-Member -MemberType ScriptMethod -Name BringIntoView -Value { }
+        }
         $ActivityProgress = [pscustomobject]@{ IsIndeterminate = $true; Value = 25; Visibility = 'Visible' }
         foreach ($name in @('ApplicationActions','SelectionCount','ValueInput','InputLabel','OptionOne','OptionTwo','NoticeBorder','Preview','Apply','Heading','Description','Access','Notice','Tasks','Options','Status','ShowDetails','OpenResults','OpenResultFolder','CurrentOperation','ElapsedTask','ActivityProgressText')) {
             Set-Variable -Name $name -Value ([pscustomobject]@{ Visibility = ''; Text = ''; ToolTip = ''; Content = ''; IsChecked = $false; IsEnabled = $true })
