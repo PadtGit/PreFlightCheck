@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Assessed free space by verified partition purpose, replacing the blanket 1 GiB warning for EFI and Windows recovery partitions with explicit 50 MiB EFI caution and 250 MiB recovery servicing thresholds. Kept partition observations visible and preserved event reviews and cleanup safeguards.
+
 ## 0.4.3 - 2026-10-03
 
 - Made dashboard navigation follow the displayed page with a selected outline and leading marker; kept the selected item visible and keyboard focus distinct from selection.

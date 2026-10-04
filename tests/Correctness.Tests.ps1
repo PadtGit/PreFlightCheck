@@ -133,6 +133,28 @@ Describe 'Health gate behavior' {
         Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
     }
 
+    It 'preserves the cleanup gate for <Case> space and event evidence' -ForEach @(
+        @{ Case = 'EFI observation'; Type = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'; Free = 162MB; FileSystem = 'FAT32'; Events = $false; Ready = $true }
+        @{ Case = 'recovery review'; Type = 'de94bba4-06d1-4d40-a16a-bfd50179d6ac'; Free = 115MB; FileSystem = 'NTFS'; Events = $false; Ready = $false }
+        @{ Case = 'EFI with event review'; Type = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'; Free = 162MB; FileSystem = 'FAT32'; Events = $true; Ready = $false }
+    ) {
+        $fixtureVolume = [pscustomobject]@{ UniqueId = 'fixture-volume'; DriveType = 'Fixed'; FileSystem = $FileSystem; Size = 787MB; SizeRemaining = $Free }
+        $fixturePartition = [pscustomobject]@{ AccessPaths = @('fixture-volume'); GptType = $Type }
+        $assessment = Get-VolumeSpaceAssessment -Volume $fixtureVolume -Partitions @($fixturePartition)
+        Add-Result -Step Space -Status $assessment.Status -Detail $assessment.Detail
+        if ($Events) { Add-Result -Step Events -Status Review -Detail 'Fixture recent event errors' }
+        if ($Ready) {
+            Invoke-CleanupFixture
+            $report.HealthReady | Should -BeTrue
+        } else {
+            { Invoke-CleanupFixture } | Should -Throw '*HEALTH REVIEW REQUIRED*'
+            $report.HealthReady | Should -BeFalse
+            Should -Invoke Remove-AgedTemporaryFile -Times 0 -Exactly
+            Should -Invoke Clear-RecycleBin -Times 0 -Exactly
+            Should -Invoke Delete-DeliveryOptimizationCache -Times 0 -Exactly
+        }
+    }
+
     It 'checks health before deleting files on a direct cleanup call' {
         Invoke-CleanupFixture
         $report.HealthReady | Should -BeTrue

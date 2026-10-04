@@ -1,6 +1,73 @@
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
 
+function Get-VolumeSpaceAssessment {
+    <#
+    .SYNOPSIS
+    Assesses fixed-volume free space using verified GPT partition purpose.
+    .DESCRIPTION
+    EFI uses a 50 MiB project caution threshold, not a Windows requirement.
+    Recovery uses a 250 MiB WinRE servicing allowance. Other or unresolved
+    partitions retain the existing 1 GiB threshold. No system changes are made.
+    .PARAMETER Volume
+    Volume inventory with UniqueId, DriveType, FileSystem, Size and SizeRemaining.
+    .PARAMETER Partitions
+    Partition inventory with AccessPaths and GptType, collected by Get-Partition.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Volume,
+        [AllowEmptyCollection()][object[]]$Partitions = @()
+    )
+    if ($Volume.DriveType -ne 'Fixed') { return }
+    $volumeId = [string]$Volume.UniqueId
+    $sizeProperty = $Volume.PSObject.Properties['Size']
+    $freeProperty = $Volume.PSObject.Properties['SizeRemaining']
+    $size = [decimal]0
+    $free = [decimal]0
+    if ($null -eq $sizeProperty -or $null -eq $freeProperty -or
+        $null -eq $sizeProperty.Value -or $null -eq $freeProperty.Value -or
+        -not [decimal]::TryParse([string]$sizeProperty.Value, [ref]$size) -or
+        -not [decimal]::TryParse([string]$freeProperty.Value, [ref]$free) -or
+        $size -le 0 -or $free -lt 0 -or $free -gt $size) {
+        return [pscustomobject]@{ Status = 'Review'; Detail = "Volume ${volumeId}: space measurements are unavailable or invalid; free space could not be assessed." }
+    }
+
+    $matchingPartitions = @($Partitions | Where-Object {
+        $null -ne $_ -and $null -ne $_.PSObject.Properties['AccessPaths'] -and
+        -not [string]::IsNullOrWhiteSpace($volumeId) -and @($_.AccessPaths) -contains $volumeId
+    })
+    $role = 'Unresolved'
+    $minimumFreeBytes = 1GB
+    $guid = [guid]::Empty
+    if ($matchingPartitions.Count -eq 1 -and $null -ne $matchingPartitions[0].PSObject.Properties['GptType'] -and
+        [guid]::TryParse([string]$matchingPartitions[0].GptType, [ref]$guid)) {
+        switch ($guid.ToString()) {
+            'c12a7328-f81f-11d2-ba4b-00a0c93ec93b' { $role = 'EFI'; $minimumFreeBytes = 50MB }
+            'de94bba4-06d1-4d40-a16a-bfd50179d6ac' { $role = 'Recovery'; $minimumFreeBytes = 250MB }
+            'ebd0a0a2-b9e5-4433-87c0-68b6b72699c7' { $role = 'Data' }
+        }
+    }
+    $status = 'Observed'
+    if ($free -lt $minimumFreeBytes) { $status = 'Review' }
+    $detail = '{0} volume {1}: {2:N1} MiB free of {3:N1} MiB filesystem capacity. ' -f
+        $role, $volumeId, ($free / 1MB), ($size / 1MB)
+    switch ($role) {
+        'EFI' { $detail += 'EFI project caution threshold: 50 MiB; this is not a Windows update requirement.' }
+        'Recovery' { $detail += 'Windows RE servicing allowance: 250 MiB; low space does not establish image corruption or backup failure.' }
+        'Data' { $detail += 'Ordinary-volume caution threshold: 1 GiB; check backup-job space requirements.' }
+        default { $detail += 'Partition purpose is unresolved; the ordinary 1 GiB caution threshold still applies.' }
+    }
+    if ($status -eq 'Review') { $detail += ' Free space is below the allowance; review partition capacity.' }
+    $fileSystemProperty = $Volume.PSObject.Properties['FileSystem']
+    if (($role -eq 'EFI' -and ($null -eq $fileSystemProperty -or $fileSystemProperty.Value -ne 'FAT32')) -or
+        ($role -eq 'Recovery' -and ($null -eq $fileSystemProperty -or $fileSystemProperty.Value -ne 'NTFS'))) {
+        $status = 'Review'
+        $detail += ' The filesystem is unavailable or unexpected for this partition purpose; review storage.'
+    }
+    [pscustomobject]@{ Status = $status; Detail = $detail }
+}
+
 function Get-PendingRestartState {
     <#
     .SYNOPSIS
@@ -364,4 +431,4 @@ function Remove-AgedTemporaryFile {
     [pscustomobject]@{ Root = $Root; Deleted = $deleted; Skipped = $skipped; Failed = $failed; LogicalBytesDeleted = $bytes }
 }
 
-Export-ModuleMember -Function Get-PendingRestartState, Get-AcPowerState, Get-ReportReviewFinding, Get-GuidedRunDisposition, Get-ReportFailureMessage, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile
+Export-ModuleMember -Function Get-VolumeSpaceAssessment, Get-PendingRestartState, Get-AcPowerState, Get-ReportReviewFinding, Get-GuidedRunDisposition, Get-ReportFailureMessage, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile
