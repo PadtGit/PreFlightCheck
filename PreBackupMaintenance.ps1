@@ -149,14 +149,16 @@ try {
             $WhatIfPreference = $false
             $report.VolumesBefore = @(Get-Volume | Select-Object DriveLetter,UniqueId,FileSystem,DriveType,Size,SizeRemaining,HealthStatus)
             $report.Disks = @(Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,OperationalStatus)
+            $partitions = @(Get-Partition -ErrorAction Stop | Select-Object AccessPaths,GptType)
         } finally { $WhatIfPreference = $savedWhatIf }
         if ($report.Disks.Count -eq 0 -or $report.VolumesBefore.Count -eq 0) { throw 'Storage inventory returned no data.' }
         foreach ($disk in $report.Disks) {
             if ($disk.HealthStatus -ne 'Healthy') { Add-Result -Step Disk -Status Review -Detail "$($disk.FriendlyName): $($disk.HealthStatus). Protect data before maintenance." }
         }
         foreach ($volume in $report.VolumesBefore) {
-            if ($volume.DriveType -eq 'Fixed' -and $volume.Size -gt 0 -and $volume.SizeRemaining -lt 1GB) {
-                Add-Result -Step Space -Status Review -Detail "Volume $($volume.UniqueId) has $([math]::Round($volume.SizeRemaining/1MB)) MB free. Check backup-job requirements, including recovery partitions."
+            $spaceAssessment = Get-VolumeSpaceAssessment -Volume $volume -Partitions $partitions
+            if ($null -ne $spaceAssessment) {
+                Add-Result -Step Space -Status $spaceAssessment.Status -Detail $spaceAssessment.Detail
             }
         }
     } catch { Add-Result -Step Storage -Status Failed -Detail $_.Exception.Message }

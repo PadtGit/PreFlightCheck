@@ -19,6 +19,7 @@ For contributors, see [CONTRIBUTING.md](CONTRIBUTING.md) for the exact local tes
 ## Features
 
 - System review: storage, pending restart state, Windows security status, recent errors, VSS information, and temporary-file inventory.
+- Space review identifies EFI and Windows recovery partitions automatically: 50 MiB of EFI free space is a project caution threshold, recovery uses a 250 MiB servicing allowance, and ordinary volumes retain the 1 GiB threshold. Small partitions remain visible in reports; any review finding still blocks cleanup.
 - Cleanup: old regular files from user and Windows Temp folders, with optional Recycle Bin and Delivery Optimization cleanup.
 - Windows health: DISM, SFC, and online NTFS checks, with optional repair and component cleanup.
 - System Corruption Scan: a separate WinUtil-style sequence using `chkdsk /scan /perf`, `sfc /scannow`, and `dism /online /cleanup-image /restorehealth`.
