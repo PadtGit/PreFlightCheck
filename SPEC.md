@@ -286,9 +286,10 @@ Exit codes (maintenance entry point, guided run, and worker; the worker returns 
   step and exits 0 only if no step failed. `-SkipAnalysis` skips the analyzer and is not a full pass.
 - Tests use mocks, isolated files, fixture child processes, and UI fixtures. They never run real maintenance.
   Several tests extract functions from the production scripts by name.
-- `tests/Documentation.Tests.ps1` checks the documentation itself: every relative link and section anchor in
-  tracked Markdown and MDX files resolves, every `@` import in `CLAUDE.md` names an existing file, and the
-  `README.md` version line and the newest `CHANGELOG.md` release match `VERSION`.
+- `tests/Documentation.Tests.ps1` checks the documentation itself: every relative link (inline or
+  reference-style, with exact path case) and section anchor in tracked Markdown and MDX files resolves,
+  `CLAUDE.md` imports `AGENTS.md`, `.claude/CLAUDE.md`, and only existing files, and the `README.md` version
+  line and the newest `CHANGELOG.md` release match `VERSION`.
 - Analyzer policy: all 75 rules enabled, no exclusions. The release gate fails on Error-severity findings,
   unsuppressed findings outside the advisory list, and engine errors that persist after three attempts per
   file. The advisory rules are `PSAlignAssignmentStatement`, `PSAvoidLongLines`,
