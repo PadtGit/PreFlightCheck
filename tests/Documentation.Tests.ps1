@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 Describe 'Documentation links' {
     BeforeAll {
         $script:repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
@@ -31,16 +33,19 @@ Describe 'Documentation links' {
         function Get-LinkTarget {
             <#
             .SYNOPSIS
-                Returns inline link destinations and reference-style link definitions outside code.
+                Returns parsed inline and reference link destinations, excluding code and footnotes.
             #>
+            [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseCompatibleTypes', '',
+                Justification = 'Tests run only in PowerShell 7, where ConvertFrom-Markdown loads the bundled Markdig types before use; the 5.1 profile is not a test host.')]
             param ([string]$Text)
-            $prose = [regex]::Replace((Get-UnfencedText -Text $Text), '`[^`\r\n]*`', '')
-            foreach ($match in [regex]::Matches($prose, '\]\((?<target>[^)\s]+)(?:\s+"[^"]*")?\)')) {
-                $match.Groups['target'].Value
-            }
-            # Reference definitions such as "[docs]: path.md"; "[^1]:" is a footnote, not a link.
-            foreach ($match in [regex]::Matches($prose, '(?m)^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*<?(?<target>[^\s>]+)')) {
-                $match.Groups['target'].Value
+            # PowerShell's built-in parser distinguishes code from prose and handles <paths with spaces>.
+            $markdown = ConvertFrom-Markdown -InputObject $Text -ErrorAction Stop
+            foreach ($node in [Markdig.Syntax.MarkdownObjectExtensions]::Descendants($markdown.Tokens)) {
+                $isLink = $node -is [Markdig.Syntax.Inlines.LinkInline]
+                $isDefinition = $node -is [Markdig.Syntax.LinkReferenceDefinition] -and $node.Label -notlike '^*'
+                if (($isLink -or $isDefinition) -and $node.Url) {
+                    $node.Url
+                }
             }
         }
 
@@ -70,27 +75,29 @@ Describe 'Documentation links' {
         function Get-HeadingSlug {
             <#
             .SYNOPSIS
-                Returns the GitHub-style anchor slug of every heading in a Markdown file.
+                Returns unique GitHub-style anchor slugs derived from rendered heading text.
             #>
             param ([string]$Path)
-            $text = Get-UnfencedText -Text ([IO.File]::ReadAllText($Path))
-            $count = @{}
-            foreach ($match in [regex]::Matches($text, '(?m)^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*\r?$')) {
-                $heading = $match.Groups[1].Value.Replace('`', '').Trim().ToLowerInvariant()
+            $html = (ConvertFrom-Markdown -LiteralPath $Path -ErrorAction Stop).Html
+            $usedSlugs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            $pattern = '(?s)<h(?<level>[1-6])(?:\s[^>]*)?>(?<heading>.*?)</h\k<level>>'
+            foreach ($match in [regex]::Matches($html, $pattern)) {
+                $visibleText = [regex]::Replace($match.Groups['heading'].Value, '<[^>]*>', '')
+                $heading = [Net.WebUtility]::HtmlDecode($visibleText).Trim().ToLowerInvariant()
                 $slug = ([regex]::Replace($heading, '[^\w\- ]', '')).Replace(' ', '-')
-                # GitHub numbers repeated headings: setup, setup-1, setup-2.
-                if ($count.ContainsKey($slug)) {
-                    $count[$slug]++
-                    '{0}-{1}' -f $slug, $count[$slug]
+                $uniqueSlug = $slug
+                $suffix = 0
+                # Reserve every emitted slug, including literal headings such as "foo-1".
+                while (-not $usedSlugs.Add($uniqueSlug)) {
+                    $suffix++
+                    $uniqueSlug = '{0}-{1}' -f $slug, $suffix
                 }
-                else {
-                    $count[$slug] = 0
-                    $slug
-                }
+                $uniqueSlug
             }
         }
 
-        $script:documents = @(Get-GitFile -Argument '--cached', '--', '*.md', '*.mdx')
+        # Filter here, not with a git pathspec: pwsh on Linux and macOS expands '*.md' before git sees it.
+        $script:documents = @(Get-GitFile -Argument '--cached' | Where-Object { $_ -match '\.(md|mdx)$' })
         # Tracked and new unignored files and their folders, compared with exact case as GitHub does.
         $script:linkTargets = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $null = $script:linkTargets.Add('')
@@ -101,8 +108,9 @@ Describe 'Documentation links' {
         }
     }
 
-    It 'finds the tracked documentation files' {
+    It 'finds the tracked documentation files, including those in subfolders' {
         $script:documents.Count | Should -BeGreaterThan 0
+        @($script:documents | Where-Object { $_ -like '*/*' }).Count | Should -BeGreaterThan 0
     }
 
     It 'resolves every relative link and section anchor in tracked Markdown' {
@@ -114,6 +122,7 @@ Describe 'Documentation links' {
                     continue
                 }
                 $pathPart, $anchor = $target.Split('#', 2)
+                $pathPart = $pathPart.Split('?', 2)[0]
                 $relative = $document
                 if ($pathPart) {
                     $linkPath = [uri]::UnescapeDataString($pathPart)
@@ -171,9 +180,15 @@ Describe 'Release version references' {
     }
 
     It 'starts the CHANGELOG release history with VERSION' {
-        $newestRelease = [regex]::Match($script:changelog, '(?m)^## (?<version>\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}\s*$')
+        $html = (ConvertFrom-Markdown -InputObject $script:changelog -ErrorAction Stop).Html
+        $headings = @([regex]::Matches($html, '(?s)<h2(?:\s[^>]*)?>(?<heading>.*?)</h2>'))
+        $headings.Count | Should -BeGreaterThan 1 -Because 'CHANGELOG.md starts with Unreleased and a release'
+        $headings[0].Groups['heading'].Value.Trim() | Should -BeExactly 'Unreleased'
+        # Select the first release before validating it; never skip a malformed newer entry.
+        $newestRelease = [regex]::Match($headings[1].Groups['heading'].Value.Trim(),
+            '^(?<version>\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}$')
 
-        $newestRelease.Success | Should -BeTrue -Because 'CHANGELOG.md has a "## X.Y.Z - YYYY-MM-DD" heading'
+        $newestRelease.Success | Should -BeTrue -Because 'the first release heading is "## X.Y.Z - YYYY-MM-DD"'
         $newestRelease.Groups['version'].Value | Should -Be $script:version
     }
 }
