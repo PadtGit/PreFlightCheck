@@ -248,7 +248,7 @@ firmware paths as high-risk. Preserve these behaviors unless the user explicitly
 - Keep diffs reviewable. Every changed line should trace to the request. If a change starts spreading
   across unrelated areas, pause and reassess.
 - Several tests extract functions by name from the production script ASTs (`Correctness.Tests.ps1`,
-  `LiveChecks.Tests.ps1`, `CleanupStatus.Tests.ps1`, `DashboardUx.Tests.ps1`). Renaming or moving one means
+  `LiveChecks.Tests.ps1`, `CleanupStatus.Tests.ps1`, `DashboardUx.Tests.ps1`, `VolumeSpace.Tests.ps1`). Renaming or moving one means
   updating those tests in the same change.
 
 ## 8. Verification

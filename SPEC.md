@@ -26,7 +26,7 @@ README asks operators to review suitability on other computers. The repository i
 - UI: WPF, with the XAML inline in `Start-Maintenance.ps1`.
 - Configuration: script parameters and one `request.json` per dashboard task. There are no configuration files.
 - Native tools and Windows cmdlets: DISM, SFC, CHKDSK, `vssadmin`, WinGet, `Get-Volume`, `Get-PhysicalDisk`,
-  `Repair-Volume`, `Get-WinEvent`, `Get-MpComputerStatus`, `Clear-RecycleBin`, and
+  `Get-Partition`, `Repair-Volume`, `Get-WinEvent`, `Get-MpComputerStatus`, `Clear-RecycleBin`, and
   `Delete-DeliveryOptimizationCache`.
 - Tests: Pester 6.2.0 under `tests/`.
 - Lint: PSScriptAnalyzer 1.25.0 with `PSScriptAnalyzerSettings.psd1`, run by `tools/Invoke-FullScriptAnalysis.ps1`.
@@ -48,16 +48,16 @@ README asks operators to review suitability on other computers. The repository i
 - `PreBackupMaintenance.ps1`: Windows PowerShell 5.1 maintenance entry point with modes `Audit`, `Clean`,
   `Health`, `SystemRepair`, and `Updates`.
 - `Invoke-PreBackupRun.ps1`: Windows PowerShell 5.1 guided sequence.
-- `Maintenance.Core.psm1`: Windows PowerShell 5.1 shared module (restart and AC-power checks, guided findings
-  and disposition, guarded Temp-file enumeration and deletion).
+- `Maintenance.Core.psm1`: Windows PowerShell 5.1 shared module (partition-aware free-space assessment,
+  restart and AC-power checks, guided findings and disposition, guarded Temp-file enumeration and deletion).
 - `Update-Applications.ps1`: Windows PowerShell 5.1 command-line WinGet preview and selected-install wrapper.
 - `Weekly-DellReview.ps1`: Windows PowerShell 5.1 attended Dell G5 5590 support-page review.
 - `PSScriptAnalyzerSettings.psd1`: analyzer settings for all 75 built-in rules.
 - `tools/`: `Invoke-LocalVerify.ps1` (local CI runner), `Invoke-FullScriptAnalysis.ps1` (full analyzer and
   release gate), `New-ReleaseArchive.ps1` (release ZIP).
 - `tests/`: Pester tests (mocks and fixtures only).
-- `docs/`: hand-written documents (`architecture.mdx`, `Full-ScriptAnalyzer-Review.md`,
-  `Dashboard-Design-Audit.md`).
+- `docs/`: hand-written documents (`architecture.mdx`, `Partition-Space-Checks.md`,
+  `Full-ScriptAnalyzer-Review.md`, `Dashboard-Design-Audit.md`).
 - `.github/`: CI workflows and Dependabot configuration.
 - `.claude/`: Claude Code settings, hooks, canonical skills, and environment notes (`.claude/CLAUDE.md`).
 - `.agents/skills/`: tracked copy of `.claude/skills/` for Codex.
@@ -193,6 +193,11 @@ PreFlightCheck changes a live system right before a backup. These requirements h
   and volume inventory with every disk and fixed volume healthy, and no pending or unknown restart.
   `SystemRepair` is the only mode allowed to start with a pending restart. Actual `Clean`, `Health`, and
   `SystemRepair` need Administrator rights.
+- **Space review.** Every fixed volume gets one `Space` result from `Get-VolumeSpaceAssessment`, using the GPT
+  type of its single matching partition: EFI 50 MiB, Windows recovery 250 MiB, and 1 GiB for data or
+  unresolved partitions. Free space below the threshold, invalid measurements, or an unexpected filesystem
+  for an EFI or recovery partition give `Review`, which blocks cleanup through the health gate. A failed
+  partition inventory fails the storage check. Details: `docs/Partition-Space-Checks.md`.
 - **Health readiness.** `HealthReady` is true only after a normal (non-repair, non-preview) health run
   completes component analysis, DISM `/ScanHealth`, SFC `/verifyonly`, and an online CHKDSK scan of every
   fixed NTFS volume with a drive letter (at least one must exist), with no review, failed, repair, or restart
@@ -253,6 +258,7 @@ Exit codes (maintenance entry point, guided run, and worker; the worker returns 
 - `SPEC.md`: this project contract.
 - `docs/architecture.mdx`: implementation reference. It uses MDX front matter but is read directly; no site
   builds it.
+- `docs/Partition-Space-Checks.md`: free-space thresholds by partition purpose.
 - `docs/Full-ScriptAnalyzer-Review.md`: analyzer policy. `docs/Dashboard-Design-Audit.md`: dashboard design
   review.
 - `CONTRIBUTING.md`: contributor workflow. `AGENTS.md`: agent working rules (imported by `CLAUDE.md`).

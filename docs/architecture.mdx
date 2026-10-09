@@ -107,7 +107,7 @@ dependencies and worktrees. See [.gitignore](../.gitignore).
 | `Dashboard.Core.psm1` | PowerShell 7. Presentation and evidence helpers for the dashboard and worker. |
 | `Invoke-GuiTask.ps1` | PowerShell 7. Validates the request, runs the 5.1 child, writes results. |
 | `PreBackupMaintenance.ps1` | Windows PowerShell 5.1. Maintenance modes, reports, exit code. |
-| `Maintenance.Core.psm1` | Windows PowerShell 5.1. Restart/power checks, findings, file-safety helpers. |
+| `Maintenance.Core.psm1` | Windows PowerShell 5.1. Space assessment, restart/power checks, findings, file-safety helpers. |
 | `Invoke-PreBackupRun.ps1` | Windows PowerShell 5.1. Runs the ordered sequence as separate child processes. |
 | `Update-Applications.ps1`, `Weekly-DellReview.ps1` | Windows PowerShell 5.1 command-line helpers. |
 | `tools/Invoke-LocalVerify.ps1` | PowerShell 7 on Windows. Runs the pinned verification steps. |
@@ -183,7 +183,7 @@ is shown as a problem, never assumed to be success.
 ### Maintenance and Shared Logic
 
 `PreBackupMaintenance.ps1` runs `Audit`, `Clean`, `Health`, `SystemRepair`, and `Updates`.
-`Maintenance.Core.psm1` supplies `Get-PendingRestartState`, `Get-AcPowerState`, the guided-run findings and
+`Maintenance.Core.psm1` supplies `Get-VolumeSpaceAssessment`, `Get-PendingRestartState`, `Get-AcPowerState`, the guided-run findings and
 disposition (`Get-ReportReviewFinding`, `Get-GuidedRunDisposition`, `Get-ReportFailureMessage`), and the
 guarded Temp-file helpers.
 
@@ -605,6 +605,7 @@ live Windows maintenance.
 | --- | --- |
 | [PreBackupMaintenance.Tests.ps1](../tests/PreBackupMaintenance.Tests.ps1) | Entry-point safety contracts, isolated Temp inventory/preview, guided findings, and regression assertions. |
 | [Correctness.Tests.ps1](../tests/Correctness.Tests.ps1) | Mocked health/repair/cleanup branches, restart conditions, RAW/NTFS fallback, matching previews, native WinGet arguments, and serialized readiness. |
+| [VolumeSpace.Tests.ps1](../tests/VolumeSpace.Tests.ps1) | Partition-aware space thresholds, classification edge cases, and storage-report integration with mocked inventory. |
 | [TemporaryFileHandle.Tests.ps1](../tests/TemporaryFileHandle.Tests.ps1) | Opened-file validation, changed timestamps, active writers, ancestor junctions, and cleanup counters in isolated fixtures. |
 | [DashboardUx.Tests.ps1](../tests/DashboardUx.Tests.ps1) | Result presentation, saved application lists, navigation/accessibility, streaming activity, and safe rendered UI fixtures. |
 | [CleanupStatus.Tests.ps1](../tests/CleanupStatus.Tests.ps1) | Cleanup lock text and colors with fixture controls. |
@@ -761,6 +762,7 @@ here as implemented only after its source, callers, tests, and packaging exist.
 - [User guide](../README.md)
 - [Agent operating instructions](../AGENTS.md)
 - [Contributor workflow](../CONTRIBUTING.md)
+- [Partition space checks](Partition-Space-Checks.md)
 - [Full PSScriptAnalyzer review](Full-ScriptAnalyzer-Review.md)
 - [Dashboard design audit](Dashboard-Design-Audit.md)
 - [Change history](../CHANGELOG.md)
