@@ -269,8 +269,9 @@ analyzer, `tools/Invoke-LocalVerify.ps1` (all three CI steps), documentation che
   what it needs; do not rely on another file having run first.
 - Dashboard changes: use the fixture tests in `DashboardUx.Tests.ps1` (the dashboard's `-UiTestOutput` mode
   renders without elevation or maintenance). Say whether the rendered window was inspected.
-- Docs-only changes: check that every referenced path, command, function, and switch exists. Runtime tests are
-  optional. Check relative links and section anchors, and compare request/report fields and task names with
+- Docs-only changes: check that every referenced path, command, function, and switch exists. Run
+  `tests/Documentation.Tests.ps1`, which checks relative links, section anchors, `CLAUDE.md` imports, and
+  version references; other runtime tests are optional. Compare request/report fields and task names with
   their producers and consumers. Do not execute maintenance examples to validate documentation. Use the
   architecture's [reference coverage](docs/architecture.mdx#reference-coverage) when adapting another
   project's documents; match its useful topics to implemented PreFlightCheck behavior.
@@ -321,8 +322,10 @@ No other file in the repository is generated. If a change adds a generator, foll
   project and this file aligned with process.
 - Contributor workflow, skill, or hook changes: update `CONTRIBUTING.md` and this file.
 - Analyzer policy changes: update `docs/Full-ScriptAnalyzer-Review.md` and the tooling together.
-- Bump `VERSION` only when preparing a release, using the `pfc-release` skill. The tag must be `v` + `VERSION`,
-  or `.github/workflows/release-archive.yml` fails. New runtime files must be added to the list in
+- Bump `VERSION` only when preparing a release, using the `pfc-release` skill. Update the `README.md`
+  `Version:` line and the newest `CHANGELOG.md` release heading in the same change;
+  `tests/Documentation.Tests.ps1` fails when they differ. The tag must be `v` + `VERSION`, or
+  `.github/workflows/release-archive.yml` fails. New runtime files must be added to the list in
   `tools/New-ReleaseArchive.ps1` and to `tests/ReleasePackage.Tests.ps1`.
 
 ## 11. Communication Style
