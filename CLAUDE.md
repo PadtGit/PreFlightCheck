@@ -15,5 +15,5 @@ Sources of truth, in reading order:
 
 Source and tests show what the code does today. When they disagree with `SPEC.md` or
 `docs/architecture.mdx`, report the mismatch instead of silently changing either side.
-`.claude/CLAUDE.md` adds local environment and testing notes; if it ever conflicts with `AGENTS.md`,
+@.claude/CLAUDE.md adds local environment and testing notes; if it ever conflicts with `AGENTS.md`,
 `AGENTS.md` wins.
