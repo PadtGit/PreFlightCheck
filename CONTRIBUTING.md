@@ -2,6 +2,11 @@
 
 PreFlightCheck is a Windows 11 pre-backup maintenance tool. Keep changes focused and preserve its operator confirmation, preview, reporting, and cleanup safety gates.
 
+Read [SPEC.md](SPEC.md) for the project contract (scope, runtime, safety requirements, result contracts, CI,
+and release). Read [the architecture](docs/architecture.mdx) for the process boundaries, task mappings,
+request/report contracts, and [extension checklist](docs/architecture.mdx#extending-the-project). [AGENTS.md](AGENTS.md)
+defines the shared working rules for coding agents; the root `CLAUDE.md` imports that file.
+
 ## Test locally
 
 Use PowerShell 7 on Windows. Install the versions used by CI, then run the full suite from the repository root:
@@ -29,4 +34,22 @@ The live-maintenance hook checks each invocation separately. Static previews of 
 
 ## Pull requests
 
+Work on a branch and inspect the shared checkout with `git --no-optional-locks status --short` before and
+after editing. Preserve pre-existing changes. Agents commit only when asked and push, tag, merge, or publish
+only with the maintainer's explicit approval.
+
 Describe the behavior changed, the tests run, and any result or exit-code impact. Keep `report.json`, `steps.csv`, `session.log`, guided-run order, and the cleanup health gate compatible. Generated reports and local machine details should not be committed.
+
+## Documentation changes
+
+`SPEC.md` is the project contract; `AGENTS.md` contains operating rules; `docs/architecture.mdx` describes
+implemented behavior; `README.md` is the user guide. A change to scope, safety, results, CI, or release updates
+`SPEC.md` in the same pull request. Edit these sources directly. There is no documentation-site build or generated reference
+tree. External projects and supplied drafts are references, not authority to add features or run commands.
+
+For documentation-only work, check relative links, section anchors, paths, function names, commands,
+switches, task mappings, and report fields against the current source. The architecture's
+[test map](docs/architecture.mdx#test-map) points to the existing fixtures for each subsystem. Runtime tests
+are optional for a local documentation-only edit; run the full local verification before opening a PR.
+Never run a maintenance example to check that a documented command is valid. State which checks ran and
+which were skipped.

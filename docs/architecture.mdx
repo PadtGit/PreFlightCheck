@@ -1,0 +1,766 @@
+---
+title: Architecture & Design
+description: How PreFlightCheck's dashboard, worker, maintenance scripts, safety gates, reports, verification, and release packaging fit together.
+---
+
+## Overview
+
+PreFlightCheck is a Windows 11 pre-backup maintenance toolkit. It reviews the system, checks Windows and
+file-system health, previews application updates and cleanup, and performs operator-confirmed maintenance.
+A separate helper supports an attended Dell G5 5590 driver and firmware review.
+
+It has a PowerShell 7 WPF dashboard and Windows PowerShell 5.1 maintenance scripts. The scripts and modules
+ship side by side; nothing is compiled into a single generated file. The operator chooses a quiet
+maintenance window and confirms that no backup or update is running. PreFlightCheck does not start,
+schedule, or detect Veeam jobs, and its results do not certify a restorable backup. See the
+[user guide](../README.md).
+
+[SPEC.md](../SPEC.md) is the project contract: scope, runtime model, safety requirements, result contracts,
+CI, and release. This page explains how the current implementation meets it, in more detail, and changes with
+it. Agent working rules are in [AGENTS.md](../AGENTS.md); contributor commands are in
+[CONTRIBUTING.md](../CONTRIBUTING.md). The repository
+has no documentation site or MDX build; the file is read directly.
+
+Use [task routing](#dashboard-and-worker) to find a feature's owner,
+[configuration and requests](#configuration-and-request-contract) for inputs,
+[health workflows](#health-and-repair-workflows) for native-tool order,
+[reports](#reports-logging-and-result-contracts) for outputs, and the
+[test map](#test-map) and [extension checklist](#extending-the-project) when changing code.
+
+### Design Principles
+
+- Keep operator decisions visible: preview first where supported, confirm apply actions, and save evidence.
+- Keep Windows PowerShell 5.1 maintenance separate from the PowerShell 7 interface and presentation layer.
+- Establish readiness from completed checks and report contents; process completion alone is insufficient.
+- Share maintenance safeguards across command-line, dashboard, and guided callers.
+- Preserve full tool output while presenting a short result with access to details.
+
+## High-Level Architecture
+
+```text
+Start-Maintenance.cmd
+  -> pwsh.exe (PowerShell 7, x64, -STA)
+     Start-Maintenance.ps1: elevated WPF window, inline XAML
+       + Dashboard.Core.psm1: presentation, live activity, cleanup selection key
+       |
+       + request.json -> separate hidden pwsh.exe process
+                         Invoke-GuiTask.ps1: allowlisted task -> arguments
+                           + Dashboard.Core.psm1: result evidence and formatting
+                           |
+                           + powershell.exe (Windows PowerShell 5.1) child
+                               + PreBackupMaintenance.ps1   (Audit/Clean/Health/SystemRepair/Updates)
+                               + Invoke-PreBackupRun.ps1    -> one 5.1 child per guided step
+                               + Weekly-DellReview.ps1
+                                 |
+                                 + Maintenance.Core.psm1: shared checks, findings, guarded deletion
+                                 + DISM, SFC, CHKDSK, vssadmin, WinGet
+                                 + report.json, steps.csv, per-tool logs
+
+Worker -> console.txt, summary.txt, details.txt, finished.json, session.log
+WPF DispatcherTimer (700 ms) -> reads live activity and completion evidence -> updates window
+
+Command line -> PreBackupMaintenance.ps1 / Update-Applications.ps1 / Invoke-PreBackupRun.ps1
+                same maintenance logic and safety gates, no dashboard
+```
+
+## Project Structure
+
+```text
+PreFlightCheck/
+|-- Start-Maintenance.cmd            Dashboard launcher (PowerShell 7 x64, STA)
+|-- Start-Maintenance.ps1            WPF layout, events, task launch, session state
+|-- Dashboard.Core.psm1              Presentation, result evidence, live activity helpers
+|-- Invoke-GuiTask.ps1               Request validation, child process, task results
+|-- Invoke-PreBackupRun.ps1          Ordered guided sequence and combined result
+|-- PreBackupMaintenance.ps1         Audit/Clean/Health/SystemRepair/Updates modes
+|-- Maintenance.Core.psm1            Shared checks, findings, guarded Temp deletion
+|-- Update-Applications.ps1          Command-line WinGet preview/install wrapper
+|-- Weekly-DellReview.ps1            Attended Dell G5 5590 support-page review
+|-- PSScriptAnalyzerSettings.psd1    All 75 analyzer rules, no exclusions
+|-- tools/
+|   |-- Invoke-LocalVerify.ps1       Local CI runner (5.1 parse, Pester, analyzer)
+|   |-- Invoke-FullScriptAnalysis.ps1  Full analyzer with release-blocking split
+|   `-- New-ReleaseArchive.ps1       Explicit-list release ZIP
+|-- tests/                           Pester safety, correctness, UI, tooling tests
+|-- docs/                            Hand-written architecture and review documents
+|-- .github/workflows/               verify.yml, release-archive.yml
+|-- .claude/skills/                  Canonical agent skills
+|-- .claude/hooks/                   Claude Code invocation, edit, and stop guards
+|-- .agents/skills/                  Synchronized Codex copy of the skills
+|-- AGENTS.md                        Agent operating rules
+|-- CLAUDE.md                        Imports AGENTS.md
+|-- CONTRIBUTING.md                  Contributor workflow
+|-- README.md                        User guide and operational limits
+|-- CHANGELOG.md                     Behavior changes and release history
+|-- SPEC.md                          Project contract (scope, runtime, safety, results)
+`-- VERSION                          Release version
+```
+
+`GuiRuns/`, `Reports/`, `ValidationReport/`, and `dist/` are generated and ignored, as are local
+dependencies and worktrees. See [.gitignore](../.gitignore).
+
+### Runtime Boundaries
+
+| Component | Runtime and responsibility |
+| --- | --- |
+| `Start-Maintenance.ps1` | PowerShell 7, 64-bit, STA. Owns the WPF window and task controls. |
+| `Dashboard.Core.psm1` | PowerShell 7. Presentation and evidence helpers for the dashboard and worker. |
+| `Invoke-GuiTask.ps1` | PowerShell 7. Validates the request, runs the 5.1 child, writes results. |
+| `PreBackupMaintenance.ps1` | Windows PowerShell 5.1. Maintenance modes, reports, exit code. |
+| `Maintenance.Core.psm1` | Windows PowerShell 5.1. Restart/power checks, findings, file-safety helpers. |
+| `Invoke-PreBackupRun.ps1` | Windows PowerShell 5.1. Runs the ordered sequence as separate child processes. |
+| `Update-Applications.ps1`, `Weekly-DellReview.ps1` | Windows PowerShell 5.1 command-line helpers. |
+| `tools/Invoke-LocalVerify.ps1` | PowerShell 7 on Windows. Runs the pinned verification steps. |
+| `tools/Invoke-FullScriptAnalysis.ps1` | No `#Requires`; CI and the local runner start it with PowerShell 7. |
+| `tools/New-ReleaseArchive.ps1` | Declares 5.1; the release workflow runs it from PowerShell 7. |
+
+`#Requires -Version 5.1` is a minimum version, not proof that a file behaves the same on both runtimes. The
+worker deliberately starts maintenance with `powershell.exe`. PowerShell parses a whole file before running
+it, so PS7-only syntax cannot hide behind a version check, and cmdlet parameters and .NET APIs must exist in
+the host that runs the file. Tests run under PowerShell 7 even when they exercise 5.1 code; that does not
+make every component dual-targeted.
+
+### Process Model
+
+Maintenance never runs on the window's thread. Each layer is a separate process with one job:
+
+| Process | Host | Responsibility |
+| --- | --- | --- |
+| Dashboard | `pwsh.exe`, STA, elevated | Own the window, accept input, confirm actions, poll results |
+| Worker | `pwsh.exe`, hidden, one per task | Validate the request, run the child, stream output, write results |
+| Maintenance child | `powershell.exe` 5.1 | Run one mode or the guided sequence, write reports, set the exit code |
+| Guided step | `powershell.exe` 5.1, one per step | Run one `PreBackupMaintenance.ps1` mode for the guided run |
+
+The dashboard allows one active task and refuses to close while it runs. Values cross process boundaries
+only as files and arguments (`request.json`, command-line switches, `report.json`, `finished.json`), so each
+contract is visible on disk. There is no worker runspace pool. Imported modules have process-local state;
+they do not share live objects with the window. The maintenance mutex is scoped to a logged-in Windows
+session, and each guided maintenance child acquires it for its own invocation. It does not reserve the
+whole guided sequence or coordinate with backup software.
+
+## Key Components
+
+### Dashboard and Worker
+
+`Start-Maintenance.cmd` looks for PowerShell 7 in its standard install folder and starts the dashboard with
+`-STA`. `Start-Maintenance.ps1` checks for Windows, a 64-bit process, and STA, and relaunches itself elevated
+for a normal interactive session. The XAML is inline; there is no separate XAML file or shared-state
+runspace. The `-UiTestOutput` parameter renders a page to an image for the fixture tests, without elevation
+and without starting maintenance.
+
+The dashboard owns navigation, input, action confirmation, and session state. For each task it creates a
+task folder, writes `request.json`, disables conflicting controls, and starts `Invoke-GuiTask.ps1` in a hidden
+PowerShell 7 process. The worker accepts only allowlisted task names and builds the arguments for the
+Windows PowerShell 5.1 child. Selected install IDs are checked in the worker; the maintenance entry point
+validates every selected application ID, including uninstall requests:
+
+| Dashboard task | Child command |
+| --- | --- |
+| `PreBackupRun` | `Invoke-PreBackupRun.ps1 -MaintenanceWindowConfirmed` (report folder `GuidedReport/`) |
+| `Audit` | `PreBackupMaintenance.ps1 -Mode Audit` |
+| `UpdatePreview`, `InstalledApps` | `-Mode Updates`, with `-ShowInstalled` for the installed list |
+| `UpdateInstall`, `UpdateUninstall` | `-Mode Updates -ApplicationId ...`, with `-Uninstall` for removal |
+| `UpdateAll` | `-Mode Updates -UpgradeAll` |
+| `CleanPreview`, `Clean` | `-Mode Clean`, with `-WhatIf` for the preview |
+| `HealthCheck`, `HealthRepair` | `-Mode Health`, with `-RepairWindows` and optional `-ComponentCleanup` |
+| `SystemRepair` | `-Mode SystemRepair` |
+| `DellReview` | `Weekly-DellReview.ps1` |
+
+Apply actions and WinGet changes ask the operator for confirmation first. The worker adds
+`-MaintenanceWindowConfirmed` to every task that needs it, including the normal health check, which runs
+without a prompt.
+
+`Receive-ProcessOutput` reads the child's stdout and stderr as they arrive and appends them to UTF-8
+`console.txt`, so progress is visible before the child exits. A WPF dispatcher timer polls every 700 ms.
+`Get-LiveActivityState` derives the current operation, elapsed time, recent output, and native percentages
+where a tool reports them; otherwise the window shows an activity indicator.
+
+After the child exits, the worker reads the maintenance or guided report, formats a concise and a detailed
+result, writes `finished.json`, and appends the task summary to the session log. The dashboard then restores
+its controls, shows the evidence, and recomputes cleanup availability. A missing summary or completion record
+is shown as a problem, never assumed to be success.
+
+### Maintenance and Shared Logic
+
+`PreBackupMaintenance.ps1` runs `Audit`, `Clean`, `Health`, `SystemRepair`, and `Updates`.
+`Maintenance.Core.psm1` supplies `Get-PendingRestartState`, `Get-AcPowerState`, the guided-run findings and
+disposition (`Get-ReportReviewFinding`, `Get-GuidedRunDisposition`, `Get-ReportFailureMessage`), and the
+guarded Temp-file helpers.
+
+Every step goes through `Add-Result` with one of five statuses: `Observed`, `Completed`, `Review`, `Skipped`,
+or `Failed`. Once the report exists, exceptions inside the main routine are recorded as a `Routine` result
+with status `Failed`, and the `finally` block attempts to save the reports. Validation and initialization
+can fail before a report exists, and writing a report can itself fail. The exit code is derived from the
+recorded statuses on the normal reporting path (see
+[Exit and Display States](#exit-and-display-states)).
+
+`Invoke-LoggedProgram` streams native-tool output on the information stream, keeps the numeric exit code on
+the success stream, saves each tool's output to its own log, and rejects exit codes outside the accepted
+list. DISM, SFC, CHKDSK, vssadmin, and WinGet each need tool-specific interpretation; for example, DISM
+`3010` means a restart is required. `SystemRepair` runs `chkdsk /scan /perf`, `sfc /scannow`, and
+`DISM /online /cleanup-image /restorehealth`, then leaves cleanup locked.
+
+`Update-Applications.ps1` is the command-line WinGet wrapper. Without switches it previews updates. With
+`-Install -ApplicationId` it passes `-MaintenanceWindowConfirmed` itself, so `-Install` is the operator's
+confirmation on that path; the other maintenance preconditions still apply.
+
+`Weekly-DellReview.ps1` checks the manufacturer and model, reports the installed BIOS, and opens the official
+Dell G5 5590 support page through `ShouldProcess`. Installing firmware stays an attended task outside this
+helper.
+
+### Shared Review Evidence
+
+Before the mode-specific work, `PreBackupMaintenance.ps1` collects a common set of observations. `Audit`
+ends after this common work and final reporting; the other modes use it for context and preconditions.
+
+| Evidence | Source and interpretation |
+| --- | --- |
+| Windows, model, BIOS, host | Registry values and current process identity; saved in `System`. |
+| Restart | `Get-PendingRestartState` checks Component Servicing, Windows Update, and pending file renames. Inaccessible checks are recorded in `Unknown`. Clear markers do not prove Windows Update is idle. |
+| AC power | `Get-AcPowerState` calls the Windows power-status API. Unknown AC state cannot authorize maintenance. |
+| Storage | `Get-PhysicalDisk` and `Get-Volume` populate disk/volume inventory. `Get-Partition` supplies access paths and GPT types to `Get-VolumeSpaceAssessment`. Missing inventory fails the check; abnormal disk health and insufficient space produce findings. EFI uses a 50 MiB project caution threshold, recovery uses a 250 MiB servicing allowance, and ordinary or unresolved partitions retain 1 GiB. All fixed-volume assessments remain visible. See [partition space checks](Partition-Space-Checks.md) for classification and sources. |
+| VSS | Elevated runs collect writer and shadow-storage output through `vssadmin`. Non-elevated runs record a review finding. This is diagnostic output, not a backup restore test. |
+| Events | Up to 100 error/critical events from System and Application over the previous three days; saved to `events.csv` for review. |
+| Defender | Protection and signature observations in `defender.json`; unavailable status requests review, and passive mode may reflect another antivirus product. |
+| Temp candidates | Aged regular-file inventory from the two permitted roots, with enumeration warnings preserved. |
+| Final space | A second volume inventory produces `VolumesAfter` and `SpaceChange`; net free-space movement is not a precise measure of bytes deleted by this process. |
+
+### Health and Repair Workflows
+
+The three health paths have different purposes. The following lists describe source routing; they are
+not instructions to run maintenance while developing.
+
+| Path | Ordered native operations | Cleanup readiness |
+| --- | --- | --- |
+| Normal `Health`, and the health gate inside actual `Clean` | DISM `/AnalyzeComponentStore`; DISM `/ScanHealth`; SFC `/verifyonly`; CHKDSK `<drive>:` `/scan` for each eligible fixed NTFS volume; final restart check. | Can set `HealthReady` only when every required check completed without review, failure, repair, or restart conditions. |
+| `Health -RepairWindows` | Component analysis; DISM `/RestoreHealth`; SFC `/scannow`; the same volume scans and final restart check. | Always leaves cleanup locked. A subsequent normal health check is required. |
+| `SystemRepair` | CHKDSK `/scan /perf`; SFC `/scannow`; DISM `/online /cleanup-image /restorehealth`; final restart check. | Always leaves cleanup locked. This branch supplies no explicit drive argument to CHKDSK; it does not use the normal per-volume loop. |
+
+`Health -ComponentCleanup` optionally adds DISM `/StartComponentCleanup` after the integrity and volume
+checks, with a fresh restart check immediately before cleanup. The dashboard exposes this option with
+`HealthRepair`; the command line permits it in `Health` with or without `-RepairWindows`. It requires an
+explicit healthy/repaired DISM conclusion and completed checks without review or failure conditions.
+
+Normal health interprets saved DISM/SFC text as well as exit codes. DISM uses `/English`; the SFC conclusions
+are matched against known English text after NUL padding is removed. Unrecognized output needs manual
+review. A successful process exit alone cannot establish integrity.
+
+Two narrow recovery paths exist in the shared Health/Clean branch:
+
+- When CHKDSK fails with the specific RAW/unsupported messages for a volume that inventory identified as
+  mounted NTFS, the code tries `Repair-Volume -Scan`. Only `NoErrorsFound` or `ScanNoErrorsFound` is accepted
+  as a clean fallback. Other results request review; a failed fallback stops the routine. This does not
+  classify an actually RAW volume as healthy.
+- When the post-health restart check reports only `ComponentServicing`, with no unknown checks, it polls
+  that marker at five-second intervals for up to 60 seconds. It accepts a clear result only after the
+  marker disappears; other restart reasons or unknown checks end this special wait and remain blocking.
+
+### WPF Events and UI Updates
+
+`Start-Maintenance.ps1` loads its inline XAML, binds named controls with `FindName`, and attaches event
+handlers explicitly. Navigation buttons call `Show-Page`. `Preview` and `Apply` call `Start-DashboardTask`,
+and the application buttons pass their selected action to that same function. Adding a control name alone
+does not register an action.
+
+`Show-Page` owns the heading, options, action labels, and selected navigation state. `Update-CleanupAvailability`
+recomputes the cleanup lock from the current input, readiness, matching preview, and active process.
+`Set-DashboardStatus` uses styles from `Get-DashboardStateStyle`; `Set-LiveActivityPresentation` updates the
+operation, elapsed time, and progress controls. The timer calls these on the WPF thread while the worker
+writes files in its own process.
+
+`Show details` toggles saved summary/detail text without starting a task. Result buttons open the saved
+summary or result folder, and the guide button opens `README.md`. The close handler refuses to close the
+window while its worker is active; there is no dashboard cancellation or rollback workflow.
+
+## Configuration and Request Contract
+
+Behavior is configured through script parameters, dashboard controls, and one JSON request per task.
+There is no application catalog, tweaks JSON, imported preset, or persistent user-preferences file.
+Opening the dashboard initializes health readiness and preview state anew.
+
+### Input Owners
+
+| Input | Owner and rules |
+| --- | --- |
+| `Mode` | Maintenance entry point; defaults to `Audit` and accepts `Audit`, `Clean`, `Health`, `SystemRepair`, `Updates`. |
+| `MinimumAgeDays` | Maintenance and guided entry points validate 7-365; default 14. Dashboard input is validated by `Get-CleanupAge`. |
+| `EmptyRecycleBin`, `ClearDeliveryCache` | `Clean` options, also forwarded by the guided run; both default off. |
+| `RepairWindows`, `ComponentCleanup` | `Health` options; both default off. |
+| `ApplicationId`, `Uninstall`, `UpgradeAll`, `ShowInstalled`, `OpenUpdatePages` | `Updates` inputs. Selected IDs have syntax/vendor checks. `Uninstall` requires at least one ID. `OpenUpdatePages` opens attended Windows Update/Store interfaces through `ShouldProcess`. |
+| `MaintenanceWindowConfirmed` | Operator acknowledgement required for actual maintenance. The dashboard worker adds it to the relevant child invocation after the UI flow. |
+| `ReportDirectory` | Maintenance/wrapper default is repository-relative `Reports`; the guided entry point requires it. The GUI worker derives it from the task directory. |
+| `UiTestOutput`, `UiPage`, `UiState` | Dashboard fixture controls. Rendering requires the Windows x64/STA host but bypasses elevation and never starts maintenance. |
+
+`Update-Applications.ps1` exposes only `ApplicationId`, `Install`, and `ReportDirectory` plus common
+`ShouldProcess` parameters. It is not a wrapper for every update action; uninstall, upgrade-all, and the
+installed list are available through the dashboard or the maintenance entry point.
+
+### Dashboard Request Fields
+
+`Start-DashboardTask` writes `request.json`, and `Invoke-GuiTask.ps1 -RequestPath` reads it. Only fields
+needed by the selected task are written. These names are an internal compatibility contract:
+
+| Field | JSON type | Tasks using it |
+| --- | --- | --- |
+| `Task` | string | Every request; must match the worker's allowlist shown in the task-routing table. |
+| `MinimumAgeDays` | number | `PreBackupRun`, `CleanPreview`, `Clean`. |
+| `EmptyRecycleBin`, `ClearDeliveryCache` | boolean | The same three cleanup/guided tasks. A qualifying preview must retain both fields, even when false. |
+| `ApplicationId` | array of strings | `UpdateInstall`, `UpdateUninstall`; the UI splits and trims comma-separated exact IDs. |
+| `ComponentCleanup` | boolean | `HealthRepair`. |
+
+Example of the request generated for a cleanup preview:
+
+```json
+{
+  "Task": "CleanPreview",
+  "MinimumAgeDays": 14,
+  "EmptyRecycleBin": false,
+  "ClearDeliveryCache": false
+}
+```
+
+The worker chooses the script and switches from the allowlisted task and passes separate process arguments.
+No request field selects an arbitrary script or command body. Requests live in the local task folder;
+they are neither signed capabilities nor a public API. UI confirmation and preview history belong to the
+dashboard; maintenance preconditions and the fresh cleanup health check remain enforced by the child.
+Never replay or fabricate a worker request as a development preview: the worker has no `-WhatIf` switch.
+
+## Data Flow
+
+### Individual Dashboard Task
+
+```text
+Choose page and options -> confirm an apply action where required
+  -> create session and task folders, write request.json
+  -> PS7 worker validates the request and starts the PS5.1 script
+  -> script checks preconditions and runs the requested mode
+  -> console.txt streams while reports and tool logs are saved
+  -> worker formats results and writes finished.json
+  -> dashboard reads the evidence, shows the result, restores controls
+```
+
+### Guided Pre-Backup Sequence
+
+`Invoke-PreBackupRun.ps1` requires a report directory, Administrator rights, and
+`-MaintenanceWindowConfirmed`. Each step starts `PreBackupMaintenance.ps1` in its own Windows PowerShell 5.1
+process, saves its console output, reads its `report.json`, and collects review findings.
+
+```text
+01-SystemReview     Audit; a pending or unknown restart stops the run
+        |
+02-WindowsHealth    Normal health checks; restart, repair, or not HealthReady stops the run
+        |
+03-WinGetPreview    Preview available updates; no application changes
+        |
+04-CleanupPreview   Clean -WhatIf with the requested age and options
+        |
+05-Cleanup          Real Clean; repeats the health checks before deletion
+        |
+06-FinalReview      Audit again; a pending restart stops before the backup
+```
+
+A step exit code other than `0` or `2` stops the run. Review findings from steps that continue are kept in
+the combined result, so a completed sequence can still exit with `2`. Do not treat every review finding as a
+stop condition, and do not drop earlier findings when the last step succeeds.
+
+## Safety and Cleanup Contracts
+
+### Preconditions and Health Readiness
+
+A named mutex refuses overlapping maintenance invocations in the same logged-in Windows session. Actual
+maintenance (`Clean`, `Health`, `SystemRepair`, and application changes) requires
+`-MaintenanceWindowConfirmed`, confirmed AC power, and healthy disk and
+volume inventory. Actual `Clean`, `Health`, and `SystemRepair` also require elevation. A pending or unknown
+restart blocks maintenance, except at the start of `SystemRepair`, and is checked again after operations
+that can cause one.
+
+Normal health readiness (`HealthReady`) requires the component analysis, DISM and SFC checks, and online
+CHKDSK scans to complete; at least one eligible fixed NTFS volume with a drive letter; and no review, failed,
+repair, or restart result. Every real `Clean` runs that health path immediately before deletion.
+`Clean -WhatIf` skips the health scans and stays a preview. Neither a preview nor a successful repair grants
+readiness. Component cleanup has the same requirements and checks the restart state again just before it runs.
+
+The dashboard adds session-level guards: a completed normal health check must report ready, and cleanup apply
+must match a successful preview's age, Recycle Bin option, and Delivery Optimization option
+(`Get-CleanupSelectionKey`). A finished health, repair, or guided task clears readiness; only a normal health
+check or guided run that exits `0` with `HealthReady` set restores it, and a repair never does. Any new task
+clears the recorded preview. The worker's report evidence,
+not a green button or a finished process, decides the result.
+
+### Temporary-File Deletion
+
+The default age is 14 days; the supported range is 7–365. Both the creation and last-write times must be older
+than the cutoff. The only automatic roots are the current user's Temp folder and Windows Temp.
+
+1. `Test-ContainedRegularPath` checks containment in the root and rejects any reparse point on the path.
+2. `Get-AgedTemporaryFile` walks regular directories and selects aged regular files, skipping links.
+3. `Remove-AgedTemporaryFile` calls `ShouldProcess` per candidate and revalidates the path and timestamps.
+4. `Remove-TemporaryFileByHandle` calls the embedded `PreBackup.NativeFile` C# type. It opens every parent
+   directory and the file with sharing that denies writers and renames, checks each handle's resolved path
+   and attributes, re-reads the file's timestamps from the handle, and marks that handle for deletion.
+
+Busy or unverifiable files are left alone. The native layer rejects network and device paths, alternate data
+streams, drive-root targets, and redirection through reparse points, and it never deletes directories. Keep
+the whole chain; a path-only check is not a replacement.
+
+Recycle Bin and Delivery Optimization cleanup are separate opt-in switches, and the Temp age policy does not
+apply to them. Component-store cleanup is separate too and never uses the irreversible base reset. Cleanup
+scope must not grow to user documents or backup repositories as a side effect of a refactor.
+
+### Preview Semantics
+
+The maintenance entry point, application wrapper, and Dell helper use `SupportsShouldProcess`. Internal
+helpers may rely on their guarded caller. Previews deliberately write reports and run read-only checks, so they are not
+write-free; they must not apply the change being previewed.
+
+The dashboard, the GUI worker, and the guided run have no global `-WhatIf`. Validate them with isolated tests
+or the dashboard's UI fixtures, never by launching live maintenance.
+
+## Application Updates and Firmware
+
+`Updates` mode previews WinGet upgrades and can list installed applications. WinGet runs only from the App
+Installer alias in the user's `WindowsApps` folder after its Microsoft signature is validated; a
+PATH-resolved `winget.exe` is never executed. Selected install, upgrade, and uninstall actions use exact
+application IDs, and IDs that look like Dell, Alienware, BIOS, or firmware packages are rejected. Each
+selected change checks the restart state afterwards and stops if one is pending.
+
+The separately confirmed `UpgradeAll` action runs `winget upgrade --all --disable-interactivity`. It does not
+apply the selected-ID exclusions and can include vendor utilities or driver packages. Keep that distinction
+in UI wording, tests, and documentation.
+
+No flow adds forced updates, unknown-version updates, automatic agreement acceptance, or an automatic reboot.
+The Dell helper reports and opens a support page; it never downloads or installs firmware.
+
+The native argument mappings in `PreBackupMaintenance.ps1` are:
+
+| Action | WinGet arguments |
+| --- | --- |
+| Available updates | `upgrade --disable-interactivity` |
+| Installed applications | `list --disable-interactivity` |
+| Selected install/upgrade | `install --id <id> --exact --disable-interactivity` |
+| Selected uninstall | `uninstall --id <id> --exact --disable-interactivity` |
+| All available upgrades | `upgrade --all --disable-interactivity` |
+
+The update preview accepts exit `0` and the no-applicable-upgrade code `-1978335189`; empty output still
+requests review. The other actions use the native runner's default accepted code `0`. Available and
+installed lists are saved in `AvailableAppUpdates.txt` and `InstalledApps.txt` and retained in dashboard
+details even after a successful task. Software registry inventory is also saved in `report.json`.
+
+PreFlightCheck does not bootstrap WinGet or install another package manager. Missing or untrusted WinGet
+is reported for review. Agreement prompts that cannot be handled with interactivity disabled remain
+visible failures/findings; the script does not accept them automatically.
+
+## Reports, Logging, and Result Contracts
+
+### Output Layout
+
+```text
+GuiRuns/<yyyyMMdd-HHmmss>-session-<id>/
+|-- session.log                         Header plus every task summary from this dashboard launch
+`-- <NN>-<Task>-<id>/
+    |-- request.json                    Worker request
+    |-- console.txt                     Streamed child stdout and stderr
+    |-- summary.txt                     Concise operator result
+    |-- details.txt                     Expanded evidence and saved WinGet lists
+    |-- finished.json                   Completion and display-state contract
+    |-- Report/<timestamp>-<id>/        Individual task report and tool logs
+    |   |-- report.json
+    |   |-- steps.csv
+    |   `-- <tool>.txt, events.csv, defender.json
+    `-- GuidedReport/                   Guided-run alternative to Report/
+        |-- guided-run.log
+        |-- current-step.txt
+        |-- guided-result.json
+        |-- guided-steps.csv
+        |-- <step>-console.txt
+        `-- <step>/<timestamp>-<id>/     Each step's own report folder
+```
+
+Direct command-line maintenance writes to `Reports/` by default; a command-line guided run writes to the
+report directory its caller supplies. Reports include machine information and local paths and stay out of
+commits.
+
+### Contract Owners
+
+| Output | Writer and consumers |
+| --- | --- |
+| `request.json` | Dashboard; read by the worker and completion handler. Task-specific input fields are listed in [the request contract](#dashboard-request-fields). |
+| `report.json` | Maintenance script; read by the guided run, the worker, and tests. Includes `Mode`, `WhatIf`, `Results`, `HealthReady`, `RestartRequired`, `RepairRecommended`, and system and cleanup evidence. |
+| `steps.csv` | Maintenance script; one row per result with `Time`, `Step`, `Status`, and `Detail`. |
+| `guided-result.json` | Guided run; completion, message, steps, review findings, and health/restart/repair flags. Read by the worker and tests. |
+| `finished.json` | Worker; exit code, task, completion time, display state and label, flags, findings, and result paths. Read by the dashboard. |
+| `session.log` | Dashboard writes the header; the worker appends each task summary. Full native output stays in the task and tool files. |
+
+This table names responsibilities; the exact schemas are in the source. When a contract change is authorized,
+change the producer, every consumer, the fixtures, and this page together. Never hand-edit generated JSON or
+CSV to make a failing result look successful.
+
+### Serialized Fields
+
+The current top-level fields are listed here so producer/consumer changes can be reviewed together.
+They have no explicit schema-version field; source and fixture compatibility matter.
+
+| File | Field groups |
+| --- | --- |
+| `report.json` | Run: `Started`, `Mode`, `WhatIf`, `Results`. Evidence: `System`, `Restart`, `Power`, `Disks`, `VolumesBefore`, `VolumesAfter`, `TempCandidates`, `Cleanup`, `Software`, `SpaceChange`. Gates: `RepairRecommended`, `RestartRequired`, `RestartAfter`, `HealthReady`. |
+| `guided-result.json` | `Finished`, `Completed`, `RestartRequired`, `RepairRecommended`, `HealthReady`, `ReviewRequired`, `ReviewFindings`, `Message`, `Steps`. The exit code comes from `Get-GuidedRunDisposition` and the process, not a top-level JSON `ExitCode` field. |
+| `finished.json` | `ExitCode`, `Task`, `Finished`, `DisplayState`, `StatusLabel`, `RestartRequired`, `RepairRecommended`, `HealthReady`, `ReviewRequired`, `ReviewFindings`, `Console`, `Results`. Here `Results` is the task directory path, not the maintenance result array. |
+
+Maintenance `Results` entries and `steps.csv` rows have `Time`, `Step`, `Status`, `Detail`. Guided `Steps`
+entries and `guided-steps.csv` rows have `Step`, `ExitCode`, `Report` (the step report directory).
+`ReviewFindings` entries have `Step`, `Check`, `Detail`, `Report` (the source report file).
+`Get-ReportReviewFinding` preserves individual review records and creates a fallback finding when a child
+exits `2` without a detailed review record.
+
+Standalone worker summaries derive their detailed findings from the maintenance report through
+`Get-GuiResultEvidence`; the worker's `ReviewFindings` array is populated from a guided result when present.
+An empty worker array therefore does not prove a standalone task has no findings.
+
+### Exit and Display States
+
+| Exit code | Meaning | Command-line label | Dashboard label |
+| --- | --- | --- | --- |
+| `0` | Requested routine completed without recorded warnings | `OK` | `SUCCESS` |
+| `1` | Failed or unavailable essential check, or a stopped guided run | `ACTION NEEDED` | `ACTION NEEDED` |
+| `2` | Review required, including a completed guided run with findings | `REVIEW` | `REVIEW` |
+
+`Get-GuiResultPresentation` shows `RESTART` or `REPAIR` ahead of the exit-code state when those flags are set.
+Health readiness is a separate gate. A zero exit code neither proves the backup will restore nor lets anything
+skip the cleanup prerequisites, and it must not become an automatic Veeam backup veto.
+
+`Observed`, `Completed`, and `Skipped` alone do not cause a warning exit. `Failed` takes precedence over
+`Review` in the maintenance footer. `HealthReady` additionally requires that the health operations actually
+ran, so a preview can finish without warnings while remaining ineligible for cleanup.
+
+## Error Handling and Logging
+
+Each layer has its own reporting responsibility:
+
+| Boundary | Failure behavior and evidence |
+| --- | --- |
+| Dashboard start | `Start-DashboardTask` catches input/start errors, shows `ACTION NEEDED`, and explains why the task could not start. |
+| Worker | A rejected request, child-launch error, or result-format/write failure can terminate before `finished.json` exists. The worker has no blanket recovery handler guaranteeing a completion file. |
+| Maintenance | Individual observation checks record `Review` or `Failed` as appropriate. Unexpected errors inside the initialized routine become a `Routine` failure; final reporting attempts to save JSON/CSV and release the mutex. |
+| Guided run | Missing child reports and unacceptable exit codes stop the sequence. The catch writes a `STOP` entry; the final result preserves the failure message, prior findings, and recorded steps. |
+| Dashboard completion | The timer reads the summary and metadata after worker exit. Missing files produce an action-needed result. A polling exception uses a waiting status so a later tick can retry; this is not proof that the worker succeeded. |
+
+The normal activity path is `[RUNNING] Step: description`, followed by `[Status] Step: detail` result
+records. `Invoke-LoggedProgram` writes native text to the information stream and a per-tool UTF-8 file,
+while returning only the numeric exit code on the success stream. The GUI worker drains both stdout and
+stderr without waiting for one stream to close first. The guided runner forwards child text live and saves
+each step's console file when the child completes.
+
+`console.txt` contains the combined task stream. `summary.txt` explains the result briefly; `details.txt`
+retains the failure reason, findings, application lists, and result references. `session.log` combines task
+summaries, while `guided-run.log` records the sequence's starts, ends, and stops. These files have different
+purposes; the session log is not a transcript of every native-tool line.
+
+For a failed run, inspect its task directory, completion metadata if present, and the referenced tool/step
+reports. Do not reconstruct success from a partial log, a progress percentage, or an older task's report.
+
+## Source, Generated Output, and Distribution
+
+The root scripts and modules, launcher, analyzer settings, tests, workflows, and documents under `docs/` are
+source. `GuiRuns/` and `Reports/` are runtime evidence, `ValidationReport/` is analysis output, and `dist/`
+holds release ZIPs. Change the responsible source and regenerate the output safely.
+
+`.claude/skills/` is the canonical skill tree. `.agents/skills/` is its tracked copy for Codex, and
+`tests/AgentSkills.Tests.ps1` checks that they match. Edit the canonical copy and apply deletions and renames
+to both. Local hook copies or overrides, such as an untracked `.codex/` folder, are not project configuration.
+
+## Testing and Static Analysis
+
+`tools/Invoke-LocalVerify.ps1` mirrors CI on Windows:
+
+1. Parse every existing 5.1-marked script and module (tracked, plus new files that are not ignored) with
+   Windows PowerShell 5.1.
+2. Run `tests/` in a separate PowerShell 7 process with Pester 6.2.0 and the CI configuration.
+3. Run the full PSScriptAnalyzer 1.25.0 runner, retried up to three times.
+
+It prints PASS, FAIL, or SKIP per step. With `-SkipAnalysis`, it can exit 0 when the other checks pass even
+though the analyzer did not run; that is not a full pass. The tests cover mocked maintenance, cleanup state, protected handles, guided
+and command-line results, dashboard fixtures and streaming, packaging, local verification, hooks, and skill
+parity. Several tests pull functions out of the production scripts by AST name, so a rename or move needs a
+matching test change. UI fixture rendering never runs maintenance, and live cleanup or repair is never test
+coverage.
+
+`PSScriptAnalyzerSettings.psd1` enables all 75 built-in rules with no exclusions, including the `Write-Host`
+rule. The full runner includes suppressed diagnostics, scans tracked and non-ignored new PowerShell files,
+and splits findings into advisory and release-blocking sets. It fails on release-blocking findings and on
+persistent engine errors, so check `release-blocking.csv` and `analyzer-errors.txt` together; an empty CSV
+alone is not a pass. The bundled 5.1 and 7.0 compatibility profiles are historical baselines, not proof of
+every Windows 11 behavior.
+
+The Claude Code edit hook skips the expensive compatibility rules that the full run still evaluates. Hooks do
+not replace explicit verification and do not authorize publishing. See
+[the analyzer review](Full-ScriptAnalyzer-Review.md) and [the contributor workflow](../CONTRIBUTING.md).
+
+### Test Map
+
+Use the narrowest relevant fixtures during development, followed by full verification for script changes
+or a PR. Test filenames describe coverage; `LiveChecks.Tests.ps1` tests live **output from fixtures**, not
+live Windows maintenance.
+
+| Test file | Main coverage |
+| --- | --- |
+| [PreBackupMaintenance.Tests.ps1](../tests/PreBackupMaintenance.Tests.ps1) | Entry-point safety contracts, isolated Temp inventory/preview, guided findings, and regression assertions. |
+| [Correctness.Tests.ps1](../tests/Correctness.Tests.ps1) | Mocked health/repair/cleanup branches, restart conditions, RAW/NTFS fallback, matching previews, native WinGet arguments, and serialized readiness. |
+| [TemporaryFileHandle.Tests.ps1](../tests/TemporaryFileHandle.Tests.ps1) | Opened-file validation, changed timestamps, active writers, ancestor junctions, and cleanup counters in isolated fixtures. |
+| [DashboardUx.Tests.ps1](../tests/DashboardUx.Tests.ps1) | Result presentation, saved application lists, navigation/accessibility, streaming activity, and safe rendered UI fixtures. |
+| [CleanupStatus.Tests.ps1](../tests/CleanupStatus.Tests.ps1) | Cleanup lock text and colors with fixture controls. |
+| [LiveChecks.Tests.ps1](../tests/LiveChecks.Tests.ps1) | Native-output encoding/streaming and guided-step output through fixture child processes. |
+| [CliDisposition.Tests.ps1](../tests/CliDisposition.Tests.ps1) | Final command-line labels and exit codes through an extracted reporting footer. |
+| [ReleasePackage.Tests.ps1](../tests/ReleasePackage.Tests.ps1) | Windows PowerShell 5.1 archive creation and the explicit packaged-file contract. |
+| [LocalVerify.Tests.ps1](../tests/LocalVerify.Tests.ps1) | Verification runner behavior in fixture repositories. |
+| [MaintenanceHook.Tests.ps1](../tests/MaintenanceHook.Tests.ps1) | Invocation guard, supported literal previews, and rejected command forms. |
+| [ClaudeHooks.Tests.ps1](../tests/ClaudeHooks.Tests.ps1) | Edit-check, skill synchronization, and stop-verification hooks. |
+| [AgentSkills.Tests.ps1](../tests/AgentSkills.Tests.ps1) | Skill metadata and equality of the Claude/Codex copies. |
+
+From the repository root in PowerShell 7, a focused run can use:
+
+```powershell
+Import-Module -Name Pester -RequiredVersion 6.2.0 -Force
+Invoke-Pester -Path ./tests/Correctness.Tests.ps1 -Output Detailed
+```
+
+The full local check is:
+
+```powershell
+pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1
+```
+
+For documentation-only edits, validate links, headings, paths, switches, task names, and schema fields
+against source. Runtime tests are optional unless required for the surrounding change or PR. For UI work,
+report separately whether fixture tests passed and whether the rendered images were visually inspected.
+
+## Release Packaging
+
+`tools/New-ReleaseArchive.ps1` reads `VERSION`, checks its explicit file list, and creates
+`dist/PreFlightCheck-<version>.zip` with one versioned root folder. The archive holds the launcher, runtime
+scripts and modules, `README.md`, `CHANGELOG.md`, `VERSION`, and `LICENSE`. It leaves out tests, agent
+metadata, developer documentation, and machine reports, and it refuses to overwrite an existing archive.
+
+`.github/workflows/release-archive.yml` runs when a GitHub release is published, checks that the tag equals
+`v` plus `VERSION`, builds the archive, and uploads it. `.github/workflows/verify.yml` runs on pushes to
+`main`, pull requests to `main` or `release/**`, and manual dispatch. Add any new shipped runtime file to the
+archive list and to `tests/ReleasePackage.Tests.ps1`.
+
+## Dependencies
+
+**Runtime:**
+
+- Windows 11
+- 64-bit PowerShell 7 in `C:\Program Files\PowerShell\7` (dashboard and worker)
+- Windows PowerShell 5.1 (maintenance scripts)
+- WinGet from Microsoft's App Installer (application updates only)
+
+**Development:** Git, Pester 6.2.0, and PSScriptAnalyzer 1.25.0 from PSGallery.
+
+Windows supplies the storage/Defender cmdlets, WPF assemblies, and native diagnostic tools used by the
+scripts. The maintenance module embeds small C# interop types with `Add-Type` for AC power and handle-level
+file validation. This runtime interop is not a repository build step or a generated distributable.
+
+## Performance Considerations
+
+- The UI polls at 700 ms while maintenance runs in separate processes. Keep new expensive work in those
+  processes; the timer should read activity and update controls.
+- `Get-LiveActivityState` displays the latest 14 console lines by default. Its first/recovery scan reads
+  up to 300 trailing lines by default; subsequent parses resume from a saved byte offset and carry partial
+  records across reads. A new operation clears stale percentage state.
+- `Receive-ProcessOutput` reads stdout/stderr concurrently and waits 40 ms when neither stream has a ready
+  line. It also accumulates output in memory; the current implementation is not bounded-memory for
+  arbitrarily large logs. Diagnose any proposed change with fixture output before replacing this path.
+- Native percentages describe the active operation, not overall task completion or a reliable finish time.
+  Operations without percentages remain indeterminate.
+- The guided sequence deliberately repeats observations, and real cleanup repeats health checks. Reusing
+  cached readiness to avoid those checks would change the safety contract.
+- Measure performance using isolated files and fixture processes. Do not benchmark by running real cleanup,
+  repair, or application changes, and remove measurement scaffolding before shipping.
+
+## Security Considerations
+
+- Elevation is requested once by the dashboard; actual cleanup, health, and repair refuse to run without it.
+- Actual maintenance needs window confirmation, AC power, and healthy storage. Pending/unknown restart
+  state blocks entry except for `SystemRepair`; the read-only Dell helper has its own model check.
+- One maintenance invocation per logged-in Windows session, enforced by a named mutex.
+- Deletion is revalidated through protected file handles, never by path alone.
+- WinGet is resolved to the signed App Installer alias; selected changes take exact IDs only.
+- Reports stay local and are ignored by Git; no credentials are stored.
+- CI uses read-only repository permissions and pins its actions to commit SHAs. The release workflow alone
+  gets write access, to upload the archive.
+- The Claude Code `Block-LiveMaintenance.ps1` hook blocks live maintenance commands from an agent. It is a
+  guard on invocations, not a sandbox.
+- Local requests and report files are not authenticated messages. Keep the working tree and run folders
+  under the operator's control; a task allowlist does not make arbitrary edited JSON trustworthy.
+
+## Extending the Project
+
+Choose the existing boundary that owns the change: shared maintenance logic, mode orchestration, request
+mapping, or presentation. Keep the runtime split and the contracts instead of adding a parallel worker,
+logger, or cleanup engine.
+
+**A new dashboard task** usually needs, together:
+
+1. The button and page wiring in `Start-Maintenance.ps1`, including confirmation for a changing action.
+2. The task name in the worker allowlist and its argument mapping in `Invoke-GuiTask.ps1`.
+3. The behavior in `PreBackupMaintenance.ps1` or `Maintenance.Core.psm1`, behind `ShouldProcess`.
+4. Focused Pester tests with mocks, plus a dashboard fixture if the window changes.
+5. `README.md` and `CHANGELOG.md` entries, and this page if a flow or contract changed.
+
+Also update task-specific result evidence and progress handling in `Dashboard.Core.psm1` when necessary.
+Check both the launch path and the completion path: task names are consumed by the worker, the activity
+reader, the result formatter, and the readiness/preview logic. Merely adding an allowlisted name is
+insufficient.
+
+**A new shared check or maintenance option** belongs in the existing module/mode boundary. Keep 5.1
+compatibility, parameter validation, report evidence, and `ShouldProcess` ownership explicit. Add the check
+to the focused mocked tests and verify callers individually. Export a module function only if callers need
+it. Any effect on health readiness, cleanup scope, or the guided order needs an explicit design decision.
+
+**An application action** uses selected exact IDs from the existing WinGet lists; there is no catalog file
+to edit. A new kind of application operation needs input validation, argument construction, confirmation,
+restart handling, and mocked native-command tests together.
+
+**A report change** starts with the producer and all readers in the contract tables. Preserve existing
+field meanings and update fixtures and this page together. Keep saved details separate from the concise
+operator result.
+
+**A new runtime file** also needs the archive list in `tools/New-ReleaseArchive.ps1` and the package test.
+
+Update this page whenever those boundaries change. A generator, configuration system, or documentation site
+would need its own design first; none is implied here. If a generator is added, record its inputs, outputs,
+and regeneration command in [AGENTS.md](../AGENTS.md) Section 3 so agents treat its output as generated-only.
+
+## Reference Coverage
+
+The [WinUtil architecture reference](https://github.com/ChrisTitusTech/winutil/blob/main/docs/src/content/docs/code-reference/architecture.mdx),
+[WinUtil agent guide](https://github.com/ChrisTitusTech/winutil/blob/main/AGENTS.md), and
+[WinUtil SPEC.md](https://github.com/ChrisTitusTech/winutil/blob/main/SPEC.md) informed the topics covered here
+and in [SPEC.md](../SPEC.md). The descriptions and commands above come from PreFlightCheck's implementation.
+
+| Reference topic | PreFlightCheck coverage |
+| --- | --- |
+| Project contract (`SPEC.md`) | [SPEC.md](../SPEC.md): goals, non-goals, distribution, runtime, UI/request contract, safety, results, CI, and release. |
+| Overview, structure, and components | Runtime map, shared checks, dashboard, worker, guided run, and Dell helper. |
+| Specialized subsystem and data flows | Health/repair paths, guarded cleanup, and guided sequencing. |
+| Configuration formats and loading | Parameters and task-specific request JSON; process-local state. |
+| Threading, jobs, events, and UI updates | Child-process ownership, explicit event bindings, activity streaming, and dispatcher polling. |
+| Package managers | Trusted WinGet alias, exact-ID actions, preview/list behavior, and separately confirmed upgrade-all. |
+| Errors, logs, and results | Producer/consumer contracts, failure boundaries, output layout, and exit/display states. |
+| Testing, builds, and releases | Mock/fixture test map, local CI runner, full analyzer, and explicit-file ZIP packaging. |
+| Dependencies, performance, security, contribution | Requirements, current activity-reader behavior, safety boundaries, and extension checklists. |
+
+WinUtil's ISO/USB creation, registry-tweak undo, Chocolatey integration, compilation pipeline, and generated
+documentation have no corresponding subsystem in this checkout. Equivalent documentation coverage does
+not require implementing those features. Future proposals belong in a scoped request; document a capability
+here as implemented only after its source, callers, tests, and packaging exist.
+
+## Related Documentation
+
+- [Project contract](../SPEC.md)
+- [User guide](../README.md)
+- [Agent operating instructions](../AGENTS.md)
+- [Contributor workflow](../CONTRIBUTING.md)
+- [Full PSScriptAnalyzer review](Full-ScriptAnalyzer-Review.md)
+- [Dashboard design audit](Dashboard-Design-Audit.md)
+- [Change history](../CHANGELOG.md)
