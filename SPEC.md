@@ -61,8 +61,8 @@ README asks operators to review suitability on other computers. The repository i
 - `.github/`: CI workflows and Dependabot configuration.
 - `.claude/`: Claude Code settings, hooks, canonical skills, and environment notes (`.claude/CLAUDE.md`).
 - `.agents/skills/`: tracked copy of `.claude/skills/` for Codex.
-- `AGENTS.md`, `CLAUDE.md` (imports `AGENTS.md`), `CONTRIBUTING.md`, `README.md`, `CHANGELOG.md`, `SPEC.md`,
-  `VERSION`, `LICENSE`.
+- `AGENTS.md`, `CLAUDE.md` (imports `AGENTS.md` and `.claude/CLAUDE.md`), `CONTRIBUTING.md`, `README.md`,
+  `CHANGELOG.md`, `SPEC.md`, `VERSION`, `LICENSE`.
 - Generated and ignored (see `.gitignore`): `GuiRuns/`, `Reports/`, `ValidationReport/`, `dist/`, `*.log`,
   `.validation-deps/`, `.worktrees/`, `.claude/settings.local.json`. Untracked local agent configuration (for
   example a `.codex/` folder) is not part of the project.
@@ -286,6 +286,10 @@ Exit codes (maintenance entry point, guided run, and worker; the worker returns 
   step and exits 0 only if no step failed. `-SkipAnalysis` skips the analyzer and is not a full pass.
 - Tests use mocks, isolated files, fixture child processes, and UI fixtures. They never run real maintenance.
   Several tests extract functions from the production scripts by name.
+- `tests/Documentation.Tests.ps1` checks the documentation itself: every relative link (inline or
+  reference-style, with exact path case) and section anchor in tracked Markdown and MDX files resolves,
+  `CLAUDE.md` imports `AGENTS.md`, `.claude/CLAUDE.md`, and only existing files, and the `README.md` version
+  line and the newest `CHANGELOG.md` release match `VERSION`.
 - Analyzer policy: all 75 rules enabled, no exclusions. The release gate fails on Error-severity findings,
   unsuppressed findings outside the advisory list, and engine errors that persist after three attempts per
   file. The advisory rules are `PSAlignAssignmentStatement`, `PSAvoidLongLines`,
@@ -304,4 +308,6 @@ Exit codes (maintenance entry point, guided run, and worker; the worker returns 
 A release is valid only when its ZIP was built by `tools/New-ReleaseArchive.ps1` from the tagged source.
 `release-archive.yml` runs when a GitHub release is published, checks that the tag equals `v` plus `VERSION`,
 builds the archive, and uploads it to the release. `VERSION` changes only when a release is prepared, and
-`CHANGELOG.md` records the release's behavior changes.
+`CHANGELOG.md` records the release's behavior changes. The same change updates the `Version:` line in
+`README.md` and adds the `## X.Y.Z - YYYY-MM-DD` section at the top of the `CHANGELOG.md` release history;
+`tests/Documentation.Tests.ps1` fails when either does not match `VERSION`.

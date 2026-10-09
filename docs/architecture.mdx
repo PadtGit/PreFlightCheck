@@ -88,7 +88,7 @@ PreFlightCheck/
 |-- .claude/hooks/                   Claude Code invocation, edit, and stop guards
 |-- .agents/skills/                  Synchronized Codex copy of the skills
 |-- AGENTS.md                        Agent operating rules
-|-- CLAUDE.md                        Imports AGENTS.md
+|-- CLAUDE.md                        Imports AGENTS.md and .claude/CLAUDE.md
 |-- CONTRIBUTING.md                  Contributor workflow
 |-- README.md                        User guide and operational limits
 |-- CHANGELOG.md                     Behavior changes and release history
@@ -579,10 +579,10 @@ to both. Local hook copies or overrides, such as an untracked `.codex/` folder, 
 
 It prints PASS, FAIL, or SKIP per step. With `-SkipAnalysis`, it can exit 0 when the other checks pass even
 though the analyzer did not run; that is not a full pass. The tests cover mocked maintenance, cleanup state, protected handles, guided
-and command-line results, dashboard fixtures and streaming, packaging, local verification, hooks, and skill
-parity. Several tests pull functions out of the production scripts by AST name, so a rename or move needs a
-matching test change. UI fixture rendering never runs maintenance, and live cleanup or repair is never test
-coverage.
+and command-line results, dashboard fixtures and streaming, packaging, local verification, hooks, skill
+parity, and documentation links and version references. Several tests pull functions out of the production
+scripts by AST name, so a rename or move needs a matching test change. UI fixture rendering never runs
+maintenance, and live cleanup or repair is never test coverage.
 
 `PSScriptAnalyzerSettings.psd1` enables all 75 built-in rules with no exclusions, including the `Write-Host`
 rule. The full runner includes suppressed diagnostics, scans tracked and non-ignored new PowerShell files,
@@ -616,6 +616,8 @@ live Windows maintenance.
 | [MaintenanceHook.Tests.ps1](../tests/MaintenanceHook.Tests.ps1) | Invocation guard, supported literal previews, and rejected command forms. |
 | [ClaudeHooks.Tests.ps1](../tests/ClaudeHooks.Tests.ps1) | Edit-check, skill synchronization, and stop-verification hooks. |
 | [AgentSkills.Tests.ps1](../tests/AgentSkills.Tests.ps1) | Skill metadata and equality of the Claude/Codex copies. |
+| [Documentation.Tests.ps1](../tests/Documentation.Tests.ps1) | Relative links and section anchors in tracked Markdown, `CLAUDE.md` imports, and `README.md`/`CHANGELOG.md` agreement with `VERSION`. |
+| [DocumentationValidation.Tests.ps1](../tests/DocumentationValidation.Tests.ps1) | Isolated Git fixtures for Markdown link parsing, heading collisions, import requirements, and first-release validation. |
 
 From the repository root in PowerShell 7, a focused run can use:
 
@@ -630,9 +632,10 @@ The full local check is:
 pwsh -NoProfile -File ./tools/Invoke-LocalVerify.ps1
 ```
 
-For documentation-only edits, validate links, headings, paths, switches, task names, and schema fields
-against source. Runtime tests are optional unless required for the surrounding change or PR. For UI work,
-report separately whether fixture tests passed and whether the rendered images were visually inspected.
+For documentation-only edits, run `tests/Documentation.Tests.ps1` for links, anchors, imports, and version
+references, and check paths, switches, task names, and schema fields against source. Runtime tests are
+optional unless required for the surrounding change or PR. For UI work, report separately whether fixture
+tests passed and whether the rendered images were visually inspected.
 
 ## Release Packaging
 
