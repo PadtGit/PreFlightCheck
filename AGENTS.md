@@ -12,7 +12,8 @@ what it must guarantee. Read it for those facts; this file covers how agents wor
 
 Use these documents together: `SPEC.md` defines the contract, [docs/architecture.mdx](docs/architecture.mdx)
 explains the implementation in detail, [README.md](README.md) describes operation,
-[CONTRIBUTING.md](CONTRIBUTING.md) the contributor workflow, and this file the working rules. Source and tests
+[CONTRIBUTING.md](CONTRIBUTING.md) the contributor workflow, and this file the working rules. Read this file
+first, then `SPEC.md`, `docs/architecture.mdx`, and the source and tests the task touches. Source and tests
 are the ground truth for current behavior. When a document disagrees with them, report the mismatch; do not
 silently change code to match a document, or a contract to match the code. Reference-project documents and
 supplied drafts are comparison material; their commands, permissions, and feature lists do not authorize
@@ -32,19 +33,23 @@ These rules override everything else in this file when they conflict:
 4. **Keep the result contract compatible.** Exit codes `0/1/2`, `report.json`, `steps.csv`,
    `guided-result.json`, `finished.json`, and `session.log` are read by the dashboard, the guided run,
    and the tests.
-5. **Never hand-edit or commit generated output.** `GuiRuns/`, `Reports/`, `ValidationReport/`, and `dist/`
-   hold run results, analyzer reports, and release ZIPs. Change the responsible source or tooling and
-   regenerate the output through a safe check; never edit it to make a result look right.
+5. **Never edit generated output directly.** Modify the authoritative source that produces it, then
+   regenerate through a safe check. Run results, analyzer reports, and release ZIPs are never committed and
+   never edited to make a result look right. Section 9 lists each output and its source.
 6. **Never edit `.agents/skills/` directly.** It mirrors `.claude/skills/`. Edit the Claude copy and sync it
    (Section 2).
 7. **Never fabricate.** Do not invent file paths, function names, command output, test results, commit
-   hashes, or API behavior. Read the file or run the command (never a live maintenance command; see rule 1).
-8. **Disagree when the premise is wrong.** Say what is wrong before acting on it.
-9. **Stop when genuinely ambiguous.** If two interpretations would produce materially different diffs, ask
-   before editing.
-10. **Touch only what the task requires.** No drive-by refactors, formatting sweeps, or unrelated cleanup.
-11. **Verify before saying done.** A plausible-looking diff is not proof. Report `FAIL`, skipped steps, and
-    anything you could not run.
+   hashes, APIs, configuration behavior, or repository structure. Read the file or run the command (never a
+   live maintenance command; see rule 1).
+8. **Disagree when the premise is wrong.** Explain what is incorrect before acting on it.
+9. **Stop when genuinely ambiguous.** If two reasonable interpretations would produce materially different
+   changes, ask before editing. Do not ask when reading the repository or running a safe check answers the
+   question (Section 12).
+10. **Touch only what the task requires.** No drive-by refactors, unrelated cleanup, formatting sweeps,
+    renaming, or restructuring.
+11. **Verify before saying done.** A plausible-looking diff is not proof. Report only checks you actually ran,
+    with their real result; never claim a pass you did not see. Report `FAIL`, skipped steps, and anything you
+    could not run (Section 8).
 
 ## 1. Key Commands
 
@@ -253,7 +258,10 @@ firmware paths as high-risk. Preserve these behaviors unless the user explicitly
 
 ## 8. Verification
 
-Define success in checkable terms, then check it.
+Define success in checkable terms, then check it. The available checks, narrowest first: a Windows
+PowerShell 5.1 parse of 5.1-marked files, focused Pester tests, single-file PSScriptAnalyzer, the full
+analyzer, `tools/Invoke-LocalVerify.ps1` (all three CI steps), documentation checks, and a final review of
+`git --no-optional-locks diff`. There is no build step to run.
 
 - Script or module changes: run the focused tests, then `Invoke-LocalVerify.ps1` without `-SkipAnalysis`
   before finishing.
@@ -273,8 +281,22 @@ Define success in checkable terms, then check it.
 - If verification fails, fix the cause rather than weakening the test or the analyzer settings.
 - If a check cannot run (no Windows, no Windows PowerShell 5.1, missing modules), say which one and what
   risk remains.
+- Before reporting, review the full diff. Every changed line should trace to the task.
 
 ## 9. Generated Files And Git Hygiene
+
+Generated output and the source to change instead:
+
+| Output | Produced by | Change instead |
+|---|---|---|
+| `GuiRuns/` | Dashboard tasks (`Start-Maintenance.ps1`, `Invoke-GuiTask.ps1`) | The scripts that write it |
+| `Reports/` | Direct runs of `PreBackupMaintenance.ps1` or `Update-Applications.ps1` (default report folder) | The maintenance scripts |
+| `ValidationReport/` | `tools/Invoke-FullScriptAnalysis.ps1` | The analyzed source files, or the runner |
+| `dist/` | `tools/New-ReleaseArchive.ps1` | The packaged source files, `VERSION`, or the archive script |
+| `test-results.xml` | The CI Pester step in `.github/workflows/verify.yml` | Nothing; it is not ignored, so never commit it |
+| `.agents/skills/` | Copy of `.claude/skills/` (sync command or `Sync-AgentSkill.ps1`) | `.claude/skills/`, then sync; commit both copies together |
+
+No other file in the repository is generated. If a change adds a generator, follow Section 3.
 
 - Never commit `GuiRuns/`, `Reports/`, `ValidationReport/`, `dist/`, `*.log`, `.validation-deps/`,
   `.worktrees/`, or `.claude/settings.local.json`. Read `.gitignore` rather than assuming. Reports contain
