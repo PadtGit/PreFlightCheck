@@ -30,7 +30,8 @@ README asks operators to review suitability on other computers. The repository i
   `Delete-DeliveryOptimizationCache`.
 - Tests: Pester 6.2.0 under `tests/`.
 - Lint: PSScriptAnalyzer 1.25.0 with `PSScriptAnalyzerSettings.psd1`, run by `tools/Invoke-FullScriptAnalysis.ps1`.
-- CI: GitHub Actions (`.github/workflows/verify.yml`, `.github/workflows/release-archive.yml`); Dependabot
+- CI: GitHub Actions (`.github/workflows/verify.yml`, `.github/workflows/codex-review.yml`,
+  `.github/workflows/release-archive.yml`); Dependabot
   checks the pinned GitHub Actions monthly (`.github/dependabot.yml`).
 - Docs: hand-written Markdown and MDX. There is no documentation site or generator.
 - Release artifact: `dist/PreFlightCheck-<version>.zip`, built by `tools/New-ReleaseArchive.ps1`.
@@ -302,6 +303,14 @@ Exit codes (maintenance entry point, guided run, and worker; the worker returns 
   manual dispatch, with read-only permissions and actions pinned to commit SHAs. It installs the pinned
   modules, parses the tracked 5.1 files with Windows PowerShell, runs Pester (NUnit XML to
   `test-results.xml`), runs the analyzer up to three times, and uploads the analyzer report and test results.
+- Every pull request to `main` or `release/**` is reviewed by the Codex GitHub connector before merging.
+  `codex-review.yml` runs `tools/Set-CodexReviewStatus.ps1` from the base branch (`pull_request_target`, the
+  connector's summary-comment edits, and manual dispatch) and never checks out pull-request code. It sets the
+  `Codex review` commit status on the head commit: `success` only when the connector's summary shows a
+  completed Code Review of that exact commit, otherwise `pending` (draft, no review yet, review in progress,
+  or a review of an older commit). The status blocks a merge only while branch protection on `main` lists it
+  as a required check; protection must require `powershell-verification` and `Codex review` (limited to the
+  GitHub Actions app) and resolved conversations, so open Codex findings also block the merge.
 
 ## Release Artifact
 
