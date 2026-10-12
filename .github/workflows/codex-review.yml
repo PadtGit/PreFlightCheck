@@ -1,0 +1,48 @@
+name: Codex review gate
+
+# Runs the gate script from the base branch only: pull_request_target and issue_comment use the
+# default-branch workflow, and the checkout below is the base branch. Never check out or run PR code here.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+    branches:
+      - main
+      - 'release/**'
+  issue_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+jobs:
+  codex-review:
+    # Comment events count only when the Codex connector edits its summary on a pull request.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
+    # Job-level, so skipped runs for other comments never cancel a gate run in progress.
+    concurrency:
+      group: codex-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pull_request }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set Codex review status
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pull_request }}
+        run: ./tools/Set-CodexReviewStatus.ps1 -Repository $env:GITHUB_REPOSITORY -PullRequest $env:PR_NUMBER
