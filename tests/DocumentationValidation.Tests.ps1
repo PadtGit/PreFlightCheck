@@ -1,7 +1,23 @@
 BeforeDiscovery {
-    # Each case writes docs/check.md (Text), a first CHANGELOG release (Release), or the CLAUDE.md imports
+    # Each case writes docs/check.md (Text), README.md (Readme), a first CHANGELOG release (Release), or CLAUDE.md
     # (Imports) into an isolated Git fixture, and states how many Documentation.Tests.ps1 tests must fail.
     $script:fixtureCases = @(
+        # GitHub's rendered heading anchors omit image alt attributes, including image-only headings.
+        @{ Name = 'rejects image-only heading fragments derived from alt attributes'; Text = '# <img src="../README.md" alt="AVA logo">' + "`n[section](#ava-logo)"; Failures = 1 }
+        @{ Name = 'accepts GitHub heading anchors that omit image alt text'; Text = '# markdown-it-anchor ![npm version](../README.md)' + "`n[section](#markdown-it-anchor-)"; Failures = 0 }
+        @{ Name = 'rejects heading fragments that incorrectly include image alt text'; Text = '# markdown-it-anchor ![npm version](../README.md)' + "`n[section](#markdown-it-anchor-npm-version)"; Failures = 1 }
+        @{ Name = 'rejects wrong-case section fragments'; Text = '[section](../README.md#Intro)'; Failures = 1 }
+        @{ Name = 'rejects encoded wrong-case section fragments'; Text = '[section](../README.md#%49ntro)'; Failures = 1 }
+        @{ Name = 'accepts encoded exact-case section fragments'; Text = '[section](../README.md#%69ntro)'; Failures = 0 }
+        @{ Name = 'accepts protocol-relative inline and reference URLs'; Text = "[site](//example.invalid/guide)`n`n[reference][site]`n`n[site]: //example.invalid/other"; Failures = 0 }
+        @{ Name = 'still rejects missing repository-root paths'; Text = '[guide](/missing.md)'; Failures = 1 }
+        @{ Name = 'rejects a README version found only in a backtick fence'; Readme = '# Intro' + "`n`n" + '```markdown' + "`nVersion: [0.4.3](https://example.invalid/releases/tag/v0.4.3)`n" + '```'; Failures = 1 }
+        @{ Name = 'rejects a README version found only in a tilde fence'; Readme = "# Intro`n`n~~~markdown`nVersion: [0.4.3](https://example.invalid/releases/tag/v0.4.3)`n~~~"; Failures = 1 }
+        @{ Name = 'rejects a README version found only in indented code'; Readme = "# Intro`n`n    Version: [0.4.3](https://example.invalid/releases/tag/v0.4.3)"; Failures = 1 }
+        @{ Name = 'accepts the README version after a hard line break in prose'; Readme = "# Intro`n`nProject description.  `nVersion: [0.4.3](https://example.invalid/releases/tag/v0.4.3)"; Failures = 0 }
+        @{ Name = 'accepts the README version after a soft line break in prose'; Readme = "# Intro`n`nProject description.`nVersion: [0.4.3](https://example.invalid/releases/tag/v0.4.3)"; Failures = 0 }
+        @{ Name = 'accepts the live README version after a fenced example'; Readme = '# Intro' + "`n`n" + '```markdown' + "`nVersion: [9.9.9](https://example.invalid/releases/tag/v9.9.9)`n" + '```' + "`n`nVersion: [0.4.3](https://example.invalid/releases/tag/v0.4.3) (released)"; Failures = 0 }
+        @{ Name = 'rejects a wrong live README version despite a matching example'; Readme = '# Intro' + "`n`n" + '```markdown' + "`nVersion: [0.4.3](https://example.invalid/releases/tag/v0.4.3)`n" + '```' + "`n`nVersion: [9.9.9](https://example.invalid/releases/tag/v9.9.9)"; Failures = 1 }
         @{ Name = 'accepts anchors derived from visible heading text'; Text = '## [Setup](../README.md)' + "`n[section](#setup)"; Failures = 0 }
         @{ Name = 'accepts spaces in inline angle-bracket destinations'; Text = '[guide](<User Guide.md>)'; Failures = 0 }
         @{ Name = 'rejects missing inline angle-bracket destinations'; Text = '[guide](<Missing Guide.md>)'; Failures = 1 }
@@ -42,6 +58,9 @@ Describe 'Documentation validation fixtures' -ForEach @(@{ FixtureCases = $scrip
 
 Version: [0.4.3](https://example.invalid/releases/tag/v0.4.3)
 '@
+            if ($case.Readme) {
+                Set-Content -LiteralPath (Join-Path $project 'README.md') -Value $case.Readme -Encoding utf8
+            }
             $changelog = "# Changelog`n`n## Unreleased`n`n"
             if ($case.Release) { $changelog += "$($case.Release)`n`n" }
             $changelog += "## 0.4.3 - 2026-10-03`n"
@@ -102,7 +121,8 @@ ConvertTo-Json -InputObject @($results) -Depth 3 | Set-Content -LiteralPath $Res
         $result.Total | Should -Be 6
         $result.Failed | Should -Be $Failures -Because ($result.FailedNames -join ', ')
         if ($Failures -gt 0) {
-            $expectedTest = if ($Release) { 'starts the CHANGELOG release history with VERSION' }
+            $expectedTest = if ($Readme) { 'names VERSION in the README version line and its release link' }
+            elseif ($Release) { 'starts the CHANGELOG release history with VERSION' }
             elseif ($Imports) { 'imports AGENTS.md and .claude/CLAUDE.md, and only existing files, from CLAUDE.md' }
             else { 'resolves every relative link and section anchor in tracked Markdown' }
             $result.FailedNames | Should -Contain $expectedTest

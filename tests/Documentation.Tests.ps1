@@ -83,7 +83,7 @@ Describe 'Documentation links' {
             $pattern = '(?s)<h(?<level>[1-6])(?:\s[^>]*)?>(?<heading>.*?)</h\k<level>>'
             foreach ($match in [regex]::Matches($html, $pattern)) {
                 $visibleText = [regex]::Replace($match.Groups['heading'].Value, '<[^>]*>', '')
-                $heading = [Net.WebUtility]::HtmlDecode($visibleText).Trim().ToLowerInvariant()
+                $heading = [Net.WebUtility]::HtmlDecode($visibleText).ToLowerInvariant()
                 $slug = ([regex]::Replace($heading, '[^\w\- ]', '')).Replace(' ', '-')
                 $uniqueSlug = $slug
                 $suffix = 0
@@ -117,8 +117,8 @@ Describe 'Documentation links' {
         $problems = foreach ($document in $script:documents) {
             $text = [IO.File]::ReadAllText((Join-Path -Path $script:repositoryRoot -ChildPath $document))
             foreach ($target in Get-LinkTarget -Text $text) {
-                # Absolute URLs and other schemes are outside the repository.
-                if ($target -match '^[A-Za-z][A-Za-z0-9+.-]*:') {
+                # Absolute URLs, network-path references, and other schemes are outside the repository.
+                if ($target.StartsWith('//') -or $target -match '^[A-Za-z][A-Za-z0-9+.-]*:') {
                     continue
                 }
                 $pathPart, $anchor = $target.Split('#', 2)
@@ -133,7 +133,7 @@ Describe 'Documentation links' {
                     continue
                 }
                 $isMissingSection = $anchor -and $relative -match '\.(md|mdx)$' -and
-                    [uri]::UnescapeDataString($anchor).ToLowerInvariant() -notin
+                    [uri]::UnescapeDataString($anchor) -cnotin
                     @(Get-HeadingSlug -Path (Join-Path -Path $script:repositoryRoot -ChildPath $relative))
                 if ($isMissingSection) {
                     '{0}: missing section {1}' -f $document, $target
@@ -171,8 +171,14 @@ Describe 'Release version references' {
     }
 
     It 'names VERSION in the README version line and its release link' {
-        $pattern = '(?m)^Version: \[(?<text>[^\]]+)\]\([^)]*/releases/tag/v(?<tag>[^)/]+)\)'
-        $versionLine = [regex]::Match($script:readme, $pattern)
+        # Rendered paragraphs exclude fenced and indented examples from the canonical version line.
+        $html = (ConvertFrom-Markdown -InputObject $script:readme -ErrorAction Stop).Html
+        $pattern = '(?m)^Version: <a href="[^"]*/releases/tag/v(?<tag>[^"/]+)">(?<text>[^<]+)</a>'
+        $versionLine = [regex]::Match('', $pattern)
+        foreach ($paragraph in [regex]::Matches($html, '(?s)<p>(?<prose>.*?)</p>')) {
+            $versionLine = [regex]::Match($paragraph.Groups['prose'].Value, $pattern)
+            if ($versionLine.Success) { break }
+        }
 
         $versionLine.Success | Should -BeTrue -Because 'README.md has a "Version: [X.Y.Z](.../vX.Y.Z)" line'
         $versionLine.Groups['text'].Value | Should -Be $script:version
