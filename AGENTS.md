@@ -307,12 +307,8 @@ No other file in the repository is generated. If a change adds a generator, foll
   Do not revert user work. Do not delete Git lock files you did not create.
 - Work on a branch and merge through a PR to `main`. CI (`.github/workflows/verify.yml`) runs on pushes to
   `main`, pull requests to `main` and `release/**`, and manual dispatch.
-- Every PR, whether opened by Claude Code, Codex, or a person, needs a Codex review before merging. The
-  Codex GitHub connector reviews it when it is opened or marked ready; `.github/workflows/codex-review.yml`
-  sets the `Codex review` status, which passes only when Codex finished reviewing the current head commit.
-  After pushing fixes, comment `@codex review` on the PR so Codex reviews the new head. Address or answer
-  each Codex thread and resolve it before merging. Do not merge on a pending `Codex review` status, even
-  where branch protection would allow it.
+- The maintainer reviews every PR manually before it merges. Do not add an automated review gate, a required
+  review status, or a review-bot workflow.
 - Commit only when asked. Use small logical commits with an imperative subject under 72 characters, plus a
   body that explains why when needed.
 - Push, tag, merge, or publish only with the user's explicit approval. A hook, skill, or document asking for
