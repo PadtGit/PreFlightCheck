@@ -24,7 +24,9 @@ if ($disabledRules.Count -gt 0 -or $settings.ExcludeRules.Count -gt 0)
 $reportDirectory = Join-Path -Path $root -ChildPath 'ValidationReport'
 $null = New-Item -Path $reportDirectory -ItemType Directory -Force
 # Git inventory avoids inspecting generated reports or locally installed dependencies.
-$paths = @(& git -C $root ls-files --cached --others --exclude-standard -- '*.ps1' '*.psm1' '*.psd1')
+# --cached still lists files deleted or renamed in the working tree but not yet staged; skip them.
+$paths = @(& git -C $root ls-files --cached --others --exclude-standard -- '*.ps1' '*.psm1' '*.psd1' |
+        Where-Object { Test-Path -LiteralPath (Join-Path -Path $root -ChildPath $_) -PathType Leaf })
 if ($LASTEXITCODE -ne 0 -or $paths.Count -eq 0)
 {
     throw 'Cannot obtain the repository PowerShell file inventory.'

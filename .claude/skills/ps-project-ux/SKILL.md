@@ -14,7 +14,7 @@ Identify console/CLI, GUI dashboard, or both. Apply the relevant guidance only. 
 Applies to health checks, cleanup previews, update previews, and related command-line tasks.
 
 - Use consistent final status lines: green = OK, yellow = review needed, red = action required, aligned with existing project semantics. Include readable status text so color is supplementary.
-- Reserve `Write-Host -ForegroundColor` for final user-facing status lines. Keep data as custom objects or other structured pipeline output; use `Write-Verbose`/`Write-Information` for diagnostics.
+- Color final user-facing status lines with `Write-Information` and a `HostInformationMessage` (as `PreBackupMaintenance.ps1` does), not `Write-Host`: `PSAvoidUsingWriteHost` blocks release. Keep data as custom objects or other structured pipeline output; use `Write-Verbose` for diagnostics.
 - Summarize results in scannable tables/lists. Use `Format-Table` or other formatting only at the final display boundary so reusable functions and report pipelines retain structured data. Avoid raw cmdlet dumps.
 - Add `Write-Progress` to long operations such as DISM, SFC, and component cleanup. Use truthful phase/activity feedback when exact percentages are unavailable, and clear progress on completion or failure.
 - Keep essential errors and actionable details visible while moving lengthy diagnostics to existing logs.

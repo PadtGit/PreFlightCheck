@@ -585,9 +585,9 @@ scripts by AST name, so a rename or move needs a matching test change. UI fixtur
 maintenance, and live cleanup or repair is never test coverage.
 
 `PSScriptAnalyzerSettings.psd1` enables all 75 built-in rules with no exclusions, including the `Write-Host`
-rule. The full runner includes suppressed diagnostics, scans tracked and non-ignored new PowerShell files,
-and splits findings into advisory and release-blocking sets. It fails on release-blocking findings and on
-persistent engine errors, so check `release-blocking.csv` and `analyzer-errors.txt` together; an empty CSV
+rule. The full runner includes suppressed diagnostics, scans existing tracked and non-ignored new PowerShell
+files, and splits findings into advisory and release-blocking sets. It fails on release-blocking findings and
+on persistent engine errors, so check `release-blocking.csv` and `analyzer-errors.txt` together; an empty CSV
 alone is not a pass. The bundled 5.1 and 7.0 compatibility profiles are historical baselines, not proof of
 every Windows 11 behavior.
 

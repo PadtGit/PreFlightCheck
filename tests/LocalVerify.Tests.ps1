@@ -39,6 +39,26 @@ Describe 'Local verification script' {
         $output | Should -Match 'SKIP  Full analyzer'
     }
 
+    It 'runs the full analyzer on the remaining files when tracked scripts are deleted or renamed but not staged' {
+        $repositoryRoot = Split-Path $PSScriptRoot -Parent
+        Copy-Item -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Destination (Join-Path $script:project 'tools')
+        Copy-Item -LiteralPath (Join-Path $repositoryRoot 'PSScriptAnalyzerSettings.psd1') -Destination $script:project
+        Remove-Item -LiteralPath (Join-Path $script:project 'Removed.ps1')
+        Rename-Item -LiteralPath (Join-Path $script:project 'Kept.ps1') -NewName 'Moved.ps1'
+        $existingFiles = @(Get-ChildItem -LiteralPath $script:project -Recurse -File -Include '*.ps1', '*.psm1', '*.psd1')
+
+        $output = & pwsh -NoLogo -NoProfile -File (Join-Path $script:project 'tools/Invoke-FullScriptAnalysis.ps1') 2>&1 |
+            Out-String
+
+        # Engine errors are intermittent, so assert the inventory and report rather than the exit code.
+        $output | Should -Not -Match 'Cannot find path'
+        $summaryPath = Join-Path $script:project 'ValidationReport/analyzer-summary.json'
+        $summaryPath | Should -Exist
+        (Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json).Files | Should -Be $existingFiles.Count
+        Get-Content -LiteralPath (Join-Path $script:project 'ValidationReport/analyzer-errors.txt') -Raw |
+            Should -Not -Match 'Removed\.ps1|Kept\.ps1'
+    }
+
     It 'reports a PS7-only construct in a PS5.1 file as a parse failure' {
         Set-Content -LiteralPath (Join-Path $script:project 'Kept.ps1') -Value "#Requires -Version 5.1`r`n`$null = `$null ?? 1"
         $output = & pwsh -NoLogo -NoProfile -File (Join-Path $script:project 'tools/Invoke-LocalVerify.ps1') -SkipAnalysis 2>&1 |

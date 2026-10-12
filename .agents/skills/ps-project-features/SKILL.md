@@ -30,7 +30,7 @@ Use this map for PreFlightCheck; inspect equivalent integration points in other 
 - Use approved verbs, PascalCase function names, camelCase locals, comment-based help, `[CmdletBinding()]`, and parameter validation consistent with the module.
 - Actions that change system state need a safe `-WhatIf`/preview path. Destructive operations require `SupportsShouldProcess` and `$PSCmdlet.ShouldProcess()` guards around actual side effects, including delegated operations.
 - Use explicit, appropriate `-ErrorAction` for fallible commands, actionable error reporting, and no empty catches. Preserve native-command exit-code handling across supported runtimes.
-- Return structured data. Keep `Write-Host` for final user-facing status; use `Write-Verbose`/`Write-Information` for diagnostics.
+- Return structured data. Use `Write-Information` for user-facing status (a `HostInformationMessage` for the colored final line) and `Write-Verbose` for diagnostics; do not add `Write-Host`, which `PSAvoidUsingWriteHost` blocks.
 - Add report/log entries following existing `report.json`, `steps.csv`, and `session.log` schemas. Preserve established exit codes `0/1/2`; inspect their meanings instead of assigning new ones.
 - Check elevation where required. Preserve no forced/silent updates and no automatic reboot. Pending health/repair must block cleanup.
 
