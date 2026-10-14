@@ -39,6 +39,37 @@ Describe 'Local verification script' {
         $output | Should -Match 'SKIP  Full analyzer'
     }
 
+    It 'parses a tracked PS5.1 file with a non-ASCII name' {
+        # Git escapes non-ASCII names by default; the parse step must still find and parse this file.
+        Set-Content -LiteralPath (Join-Path $script:project "$([char]0x00E9)tude.ps1") -Value "#Requires -Version 5.1`r`n`$null = 3"
+        Invoke-Git -Arguments @('add', '-A')
+        Invoke-Git -Arguments @('commit', '-q', '-m', 'non-ASCII name')
+        Remove-Item -LiteralPath (Join-Path $script:project 'Removed.ps1')
+        $output = & pwsh -NoLogo -NoProfile -File (Join-Path $script:project 'tools/Invoke-LocalVerify.ps1') -SkipAnalysis 2>&1 |
+            Out-String
+
+        $LASTEXITCODE | Should -Be 0
+        Join-Path $script:project 'Kept.ps1' | Should -Exist
+        $output | Should -Match 'PASS  PS5\.1 parse\s+2 file\(s\)'
+    }
+
+    It 'fails the parse step and still prints the summary when a listed file cannot be read' {
+        # Another process holding the file without sharing makes it unreadable while Git still lists it.
+        $lock = [IO.File]::Open((Join-Path $script:project 'Kept.ps1'), 'Open', 'Read', 'None')
+        try {
+            $output = & pwsh -NoLogo -NoProfile -File (Join-Path $script:project 'tools/Invoke-LocalVerify.ps1') -SkipAnalysis 2>&1 |
+                Out-String
+        }
+        finally {
+            $lock.Dispose()
+        }
+
+        $LASTEXITCODE | Should -Be 1
+        $output | Should -Match 'Kept\.ps1: '
+        $output | Should -Match 'FAIL  PS5\.1 parse\s+1 listed file\(s\) could not be read'
+        $output | Should -Match 'PASS  Pester'
+    }
+
     It 'runs the full analyzer on the remaining files, non-ASCII names included, when tracked scripts are deleted or renamed but not staged' {
         $repositoryRoot = Split-Path $PSScriptRoot -Parent
         Copy-Item -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Destination (Join-Path $script:project 'tools')

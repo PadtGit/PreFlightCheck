@@ -362,8 +362,9 @@ session. Keep the list short and prune rules that no longer apply.
   times and the edit hook twice, so rerun before treating an engine error as a real finding.
 - Fixture tests that read child-process output must read it as UTF-8. They failed under OEM console code
   pages such as 850.
-- `git ls-files --cached` still lists files deleted in the working tree. Filter inventories to files that
-  exist.
+- `git ls-files` escapes non-ASCII names, and `--cached` still lists files deleted in the working tree. Read
+  inventories with `-z` and `core.quotePath=false`, decoded as UTF-8, and drop only the paths
+  `git ls-files --deleted` reports. A `Test-Path` filter silently skips escaped names.
 - Inspect a working copy you share with the user with `git --no-optional-locks status`; a plain status once
   left a stale `.git/index.lock` that blocked the user's Git commands.
 - Personal permission overrides go in `.claude/settings.local.json` (gitignored), not `.claude/settings.json`.
