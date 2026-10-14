@@ -36,9 +36,11 @@ automatically when PowerShell files or skills changed. It does not replace the f
   `?.`) in a 5.1 file. Rewrite it with `if`/`else`; a version guard does not help because the parse fails first.
 - **Pester:** failed tests start with `[-]`. Fixture output such as `[Review] CHKDSK-C: ...` is expected
   and does not mean a failure. Tests mock all maintenance actions; never "fix" a test by running real cleanup.
-- **Full analyzer:** see `ValidationReport/release-blocking.csv` and `ValidationReport/analyzer-errors.txt`.
-  Engine errors are intermittent, and the script already retries them. Only a finding listed in
-  `release-blocking.csv` is real.
+- **Full analyzer:** see `ValidationReport/release-blocking.csv` and `ValidationReport/analyzer-errors.txt`
+  together. It passes only when both `ReleaseBlockingFindings` and `EngineErrors` in
+  `analyzer-summary.json` are 0. Engine errors are intermittent and the runners already retry them; an
+  error still listed in `analyzer-errors.txt` after the retries fails the step. An empty
+  `release-blocking.csv` alone is not a pass, because a file that could not be analyzed adds no rows.
 
 `ValidationReport/` is generated and gitignored. Never commit it.
 

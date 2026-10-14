@@ -5,9 +5,10 @@
     Reads the hook payload from stdin. When PowerShell files, .claude/settings.json, or either skill copy
     differ from the base branch (origin/main, else main) in commits or in the working tree, runs
     tools/Invoke-LocalVerify.ps1 -SkipAnalysis. A failure exits 2 with the failing tests so Claude keeps
-    working. A passing state is remembered by content, so later stops skip the run until those files
-    change again. After three blocked stops in a row the hook lets Claude stop and tells Bob instead,
-    so a failure Claude cannot fix does not loop forever. Set PFC_HOOK_STATE_DIR to move the state files.
+    working. A passing state is remembered by base commit and content, so later stops skip the run until
+    those files or the base change again. After three blocked stops in a row the hook lets Claude stop and
+    tells Bob instead, so a failure Claude cannot fix does not loop forever. Set PFC_HOOK_STATE_DIR to move
+    the state files.
 #>
 [CmdletBinding()]
 param ()
@@ -96,7 +97,15 @@ if ($diff.Count -eq 0 -and $untracked.Count -eq 0)
     exit 0
 }
 
+$baseResult = Invoke-Git -Arguments @('rev-parse', '--verify', $base)
+if (-not $baseResult.Succeeded -or $baseResult.Lines.Count -eq 0)
+{
+    [Console]::Error.WriteLine('Invoke-StopVerification: git could not resolve the base commit.')
+    exit 1
+}
 $fingerprintParts = [System.Collections.Generic.List[string]]::new()
+# A rebase can keep the diff identical while the code under test changes, so the base commit is part of the key.
+$fingerprintParts.Add($baseResult.Lines[0])
 $fingerprintParts.Add(($diff -join "`n"))
 foreach ($path in ($untracked | Sort-Object))
 {

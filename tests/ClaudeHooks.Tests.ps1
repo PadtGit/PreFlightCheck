@@ -233,6 +233,23 @@ exit [int](Get-Content -LiteralPath (Join-Path $root 'verify-exit.txt') -Raw)
         Get-VerifyRunCount | Should -Be 2
     }
 
+    It 'verifies again after a rebase that keeps the diff but changes the base branch' {
+        Invoke-Git -Arguments @('switch', '-q', '-c', 'feature')
+        Set-Content -LiteralPath (Join-Path $script:project 'Script.ps1') -Value '$null = 2'
+        Invoke-Git -Arguments @('commit', '-q', '-am', 'feature change')
+        (Invoke-StopHook).ExitCode | Should -Be 0
+        Get-VerifyRunCount | Should -Be 1
+
+        Invoke-Git -Arguments @('switch', '-q', 'main')
+        Set-Content -LiteralPath (Join-Path $script:project 'Base.ps1') -Value '$null = 1'
+        Invoke-Git -Arguments @('add', 'Base.ps1')
+        Invoke-Git -Arguments @('commit', '-q', '-m', 'base change')
+        Invoke-Git -Arguments @('switch', '-q', 'feature')
+        Invoke-Git -Arguments @('rebase', '-q', 'main')
+        (Invoke-StopHook).ExitCode | Should -Be 0
+        Get-VerifyRunCount | Should -Be 2
+    }
+
     It 'blocks the stop with the failed tests and the step summary, without fixture noise' {
         Set-Content -LiteralPath (Join-Path $script:project 'verify-exit.txt') -Value '1'
         Set-Content -LiteralPath (Join-Path $script:project 'Script.ps1') -Value '$null = 2'

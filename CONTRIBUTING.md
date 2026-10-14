@@ -42,11 +42,7 @@ Work on a branch and inspect the shared checkout with `git --no-optional-locks s
 after editing. Preserve pre-existing changes. Agents commit only when asked and push, tag, merge, or publish
 only with the maintainer's explicit approval.
 
-Codex reviews every pull request before it merges. The Codex GitHub connector reviews the pull request when it
-is opened or marked ready for review, and the `Codex review` status from
-[codex-review.yml](.github/workflows/codex-review.yml) stays pending until Codex has finished reviewing the
-current head commit. After pushing fixes, comment `@codex review` to request a review of the new commit.
-Resolve each Codex thread once it is fixed or answered, and merge only after the status passes.
+The maintainer reviews every pull request manually before merging; there is no automated review gate.
 
 Describe the behavior changed, the tests run, and any result or exit-code impact. Keep `report.json`, `steps.csv`, `session.log`, guided-run order, and the cleanup health gate compatible. Generated reports and local machine details should not be committed.
 

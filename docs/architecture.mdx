@@ -83,7 +83,7 @@ PreFlightCheck/
 |   `-- New-ReleaseArchive.ps1       Explicit-list release ZIP
 |-- tests/                           Pester safety, correctness, UI, tooling tests
 |-- docs/                            Hand-written architecture and review documents
-|-- .github/workflows/               verify.yml, codex-review.yml, release-archive.yml
+|-- .github/workflows/               verify.yml, release-archive.yml
 |-- .claude/skills/                  Canonical agent skills
 |-- .claude/hooks/                   Claude Code invocation, edit, and stop guards
 |-- .agents/skills/                  Synchronized Codex copy of the skills
@@ -585,9 +585,9 @@ scripts by AST name, so a rename or move needs a matching test change. UI fixtur
 maintenance, and live cleanup or repair is never test coverage.
 
 `PSScriptAnalyzerSettings.psd1` enables all 75 built-in rules with no exclusions, including the `Write-Host`
-rule. The full runner includes suppressed diagnostics, scans tracked and non-ignored new PowerShell files,
-and splits findings into advisory and release-blocking sets. It fails on release-blocking findings and on
-persistent engine errors, so check `release-blocking.csv` and `analyzer-errors.txt` together; an empty CSV
+rule. The full runner includes suppressed diagnostics, scans existing tracked and non-ignored new PowerShell
+files, and splits findings into advisory and release-blocking sets. It fails on release-blocking findings and
+on persistent engine errors, so check `release-blocking.csv` and `analyzer-errors.txt` together; an empty CSV
 alone is not a pass. The bundled 5.1 and 7.0 compatibility profiles are historical baselines, not proof of
 every Windows 11 behavior.
 
@@ -615,7 +615,6 @@ live Windows maintenance.
 | [LocalVerify.Tests.ps1](../tests/LocalVerify.Tests.ps1) | Verification runner behavior in fixture repositories. |
 | [MaintenanceHook.Tests.ps1](../tests/MaintenanceHook.Tests.ps1) | Invocation guard, supported literal previews, and rejected command forms. |
 | [ClaudeHooks.Tests.ps1](../tests/ClaudeHooks.Tests.ps1) | Edit-check, skill synchronization, and stop-verification hooks. |
-| [CodexReviewGate.Tests.ps1](../tests/CodexReviewGate.Tests.ps1) | Codex review status decisions from summary-comment fixtures and the gate workflow's base-branch-only triggers. |
 | [AgentSkills.Tests.ps1](../tests/AgentSkills.Tests.ps1) | Skill metadata and equality of the Claude/Codex copies. |
 | [Documentation.Tests.ps1](../tests/Documentation.Tests.ps1) | Relative links and section anchors in tracked Markdown, `CLAUDE.md` imports, and `README.md`/`CHANGELOG.md` agreement with `VERSION`. |
 | [DocumentationValidation.Tests.ps1](../tests/DocumentationValidation.Tests.ps1) | Isolated Git fixtures for Markdown link parsing, heading collisions, import requirements, and first-release validation. |
@@ -649,22 +648,6 @@ metadata, developer documentation, and machine reports, and it refuses to overwr
 `v` plus `VERSION`, builds the archive, and uploads it. `.github/workflows/verify.yml` runs on pushes to
 `main`, pull requests to `main` or `release/**`, and manual dispatch. Add any new shipped runtime file to the
 archive list and to `tests/ReleasePackage.Tests.ps1`.
-
-`.github/workflows/codex-review.yml` makes the Codex GitHub connector's review a merge requirement. The
-connector reviews a pull request when it is opened or marked ready, and again on an `@codex review` comment;
-it keeps one summary comment (marked `<!-- codex-pull-request-review-summary -->`) whose table names the
-reviewed commit, and it leaves findings as review threads. The workflow runs on `pull_request_target`, on
-created or edited comments from `chatgpt-codex-connector[bot]`, and on manual dispatch with a pull request
-number. Each of these uses the base branch's workflow and checkout, so a pull request cannot change the gate
-that judges it. `tools/Set-CodexReviewStatus.ps1` reads the pull request and the newest summary comment with
-`gh api`, and `Get-CodexReviewState` returns `success` only for a completed Code Review row whose commit is
-the current head; every other case is `pending` with a description of what is missing. The script posts that
-result as the `Codex review` commit status. A push after the review makes the status pending again until
-someone comments `@codex review` and the connector finishes. The workflow only reports; the merge block
-comes from branch protection on `main`, which must list `Codex review` as a required check limited to the
-GitHub Actions app (so a status posted by hand does not count) and must require resolved conversations, so a
-pull request with open Codex threads cannot merge either. Without that setting the status is informational.
-Branch protection is not enforced for administrators, so an administrator can still bypass it.
 
 ## Dependencies
 

@@ -11,10 +11,10 @@ Install PSScriptAnalyzer 1.25.0 first. GitHub installs that exact version.
 The settings select all 75 built-in rules returned by that version, explicitly enable
 configurable rules, exclude no rules, and include Error, Warning, and Information.
 The runner includes suppressed diagnostics and checks all Git-tracked and
-non-ignored new .ps1, .psm1, and .psd1 files, including tests and the analysis
-runner itself. It fails the release gate for analyzer engine errors, Error-severity
-diagnostics, and unsuppressed correctness findings outside the documented advisory
-rule set. Formatting, historical compatibility-profile, Constrained Language Mode,
+non-ignored new .ps1, .psm1, and .psd1 files that exist in the working tree,
+including tests and the analysis runner itself. It fails the release gate for
+analyzer engine errors, Error-severity diagnostics, and unsuppressed correctness
+findings outside the documented advisory rule set. Formatting, historical compatibility-profile, Constrained Language Mode,
 encoding, and documentation diagnostics remain visible in the full audit without
 blocking a release.
 
@@ -27,8 +27,11 @@ duplicated.
 Reports are saved in ValidationReport: psscriptanalyzer-full.csv,
 release-blocking.csv, analyzer-errors.txt, and analyzer-summary.json. GitHub uploads
 these even when the analysis step fails, as the psscriptanalyzer-full-review
-artifact. A zero-row release-blocking.csv means that the analyzer release gate
-passed; it does not mean that the advisory audit is empty.
+artifact. The analyzer release gate passed only when the runner exits 0, which
+requires both ReleaseBlockingFindings and EngineErrors in analyzer-summary.json to
+be 0. A zero-row release-blocking.csv alone is not a pass: a file whose analysis
+failed on every attempt contributes no rows and is reported in analyzer-errors.txt.
+A passed gate does not mean that the advisory audit is empty.
 
 ## Compatibility and interpretation
 
@@ -39,7 +42,7 @@ newer PowerShell 7 releases. Findings must be reviewed against the actual runtim
 of each script. Unknown third-party commands and types are not proof of compatibility.
 
 Constrained Language Mode checks are enabled, with signature exemptions disabled.
-The Windows Forms dashboard and native C# helpers currently require Full Language
+The WPF dashboard and native C# helpers currently require Full Language
 Mode. CLM findings therefore document a real restriction of those features; enabling
 the rule does not make the application CLM-compatible.
 

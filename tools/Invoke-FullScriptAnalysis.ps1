@@ -24,8 +24,25 @@ if ($disabledRules.Count -gt 0 -or $settings.ExcludeRules.Count -gt 0)
 $reportDirectory = Join-Path -Path $root -ChildPath 'ValidationReport'
 $null = New-Item -Path $reportDirectory -ItemType Directory -Force
 # Git inventory avoids inspecting generated reports or locally installed dependencies.
-$paths = @(& git -C $root ls-files --cached --others --exclude-standard -- '*.ps1' '*.psm1' '*.psd1')
-if ($LASTEXITCODE -ne 0 -or $paths.Count -eq 0)
+# -z with core.quotePath=false prints names unquoted (Git escapes non-ASCII names otherwise); read them as UTF-8.
+$consoleEncoding = [Console]::OutputEncoding
+try
+{
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    $listedOutput = & git -C $root -c core.quotePath=false ls-files -z --cached --others --exclude-standard -- '*.ps1' '*.psm1' '*.psd1'
+    $listedExitCode = $LASTEXITCODE
+    # --cached still lists files deleted or renamed in the working tree but not yet staged. Drop only those,
+    # so any other listed file that cannot be read fails the analysis instead of being skipped.
+    $deletedOutput = & git -C $root -c core.quotePath=false ls-files -z --deleted -- '*.ps1' '*.psm1' '*.psd1'
+    $deletedExitCode = $LASTEXITCODE
+}
+finally
+{
+    [Console]::OutputEncoding = $consoleEncoding
+}
+$deletedPaths = @(($deletedOutput -join "`n") -split "`0")
+$paths = @(($listedOutput -join "`n") -split "`0" | Where-Object { $_ -and $_ -cnotin $deletedPaths })
+if ($listedExitCode -ne 0 -or $deletedExitCode -ne 0 -or $paths.Count -eq 0)
 {
     throw 'Cannot obtain the repository PowerShell file inventory.'
 }
