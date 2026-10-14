@@ -5,7 +5,7 @@
 - Assessed free space by verified partition purpose, replacing the blanket 1 GiB warning for EFI and Windows recovery partitions with explicit 50 MiB EFI caution and 250 MiB recovery servicing thresholds. Kept partition observations visible and preserved event reviews and cleanup safeguards.
 - Added `SPEC.md` as the project contract and `docs/architecture.mdx` as the implementation reference, and aligned the agent instructions (`AGENTS.md`, `CLAUDE.md`) and contributor guide with them.
 - Added documentation tests that check relative links and section anchors in tracked Markdown, the `CLAUDE.md` imports, and that the `README.md` version line and newest `CHANGELOG.md` release match `VERSION`.
-- Re-ran the Claude Code Stop verification after a rebase onto a changed base branch instead of reusing the earlier pass, and kept the full analyzer running when a tracked script is deleted or renamed but not yet staged.
+- Re-ran the Claude Code Stop verification after a rebase onto a changed base branch instead of reusing the earlier pass, and kept the full analyzer running when a tracked script is deleted or renamed but not yet staged. The analyzer now also checks scripts with non-ASCII file names instead of failing on them.
 - Corrected the repository skills and analyzer documentation to use `Write-Information` instead of `Write-Host` for status lines and to require zero release-blocking findings and zero engine errors for an analyzer pass.
 
 ## 0.4.3 - 2026-10-03

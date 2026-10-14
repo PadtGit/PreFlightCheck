@@ -39,10 +39,14 @@ Describe 'Local verification script' {
         $output | Should -Match 'SKIP  Full analyzer'
     }
 
-    It 'runs the full analyzer on the remaining files when tracked scripts are deleted or renamed but not staged' {
+    It 'runs the full analyzer on the remaining files, non-ASCII names included, when tracked scripts are deleted or renamed but not staged' {
         $repositoryRoot = Split-Path $PSScriptRoot -Parent
         Copy-Item -LiteralPath (Join-Path $repositoryRoot 'tools/Invoke-FullScriptAnalysis.ps1') -Destination (Join-Path $script:project 'tools')
         Copy-Item -LiteralPath (Join-Path $repositoryRoot 'PSScriptAnalyzerSettings.psd1') -Destination $script:project
+        # Git escapes non-ASCII names by default; the analyzer must still find and analyze this file.
+        Set-Content -LiteralPath (Join-Path $script:project "$([char]0x00E9)tude.ps1") -Value '$null = 3'
+        Invoke-Git -Arguments @('add', '-A')
+        Invoke-Git -Arguments @('commit', '-q', '-m', 'non-ASCII name')
         Remove-Item -LiteralPath (Join-Path $script:project 'Removed.ps1')
         Rename-Item -LiteralPath (Join-Path $script:project 'Kept.ps1') -NewName 'Moved.ps1'
         $existingFiles = @(Get-ChildItem -LiteralPath $script:project -Recurse -File -Include '*.ps1', '*.psm1', '*.psd1')
@@ -56,7 +60,7 @@ Describe 'Local verification script' {
         $summaryPath | Should -Exist
         (Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json).Files | Should -Be $existingFiles.Count
         Get-Content -LiteralPath (Join-Path $script:project 'ValidationReport/analyzer-errors.txt') -Raw |
-            Should -Not -Match 'Removed\.ps1|Kept\.ps1'
+            Should -Not -Match 'Removed\.ps1|Kept\.ps1|tude\.ps1'
     }
 
     It 'reports a PS7-only construct in a PS5.1 file as a parse failure' {
