@@ -6,6 +6,7 @@
 - Added `SPEC.md` as the project contract and `docs/architecture.mdx` as the implementation reference, and aligned the agent instructions (`AGENTS.md`, `CLAUDE.md`) and contributor guide with them.
 - Added documentation tests that check relative links and section anchors in tracked Markdown, the `CLAUDE.md` imports, and that the `README.md` version line and newest `CHANGELOG.md` release match `VERSION`.
 - Re-ran the Claude Code Stop verification after a rebase onto a changed base branch instead of reusing the earlier pass, and kept the full analyzer running when a tracked script is deleted or renamed but not yet staged. The analyzer now also checks scripts with non-ASCII file names instead of failing on them.
+- Parsed Windows PowerShell 5.1 scripts with non-ASCII file names in local verification instead of silently skipping them, and failed the parse step with the summary intact when a listed script cannot be read; the documentation tests likewise keep non-ASCII Markdown file names under OEM console code pages.
 - Corrected the repository skills and analyzer documentation to use `Write-Information` instead of `Write-Host` for status lines and to require zero release-blocking findings and zero engine errors for an analyzer pass.
 
 ## 0.4.3 - 2026-10-03

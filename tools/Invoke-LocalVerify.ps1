@@ -44,20 +44,53 @@ function Add-StepResult
 
 # Step 1: parse every file marked for Windows PowerShell 5.1 with Windows PowerShell, as CI does.
 Write-Output '== PS5.1 parse =='
-$inventory = @(& git -C $repositoryRoot ls-files --cached --others --exclude-standard -- '*.ps1' '*.psm1')
-if ($LASTEXITCODE -ne 0)
+# -z with core.quotePath=false prints names unquoted (Git escapes non-ASCII names otherwise); read them as UTF-8.
+$consoleEncoding = [Console]::OutputEncoding
+try
+{
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    $listedOutput = & git -C $repositoryRoot -c core.quotePath=false ls-files -z --cached --others --exclude-standard -- '*.ps1' '*.psm1'
+    $listedExitCode = $LASTEXITCODE
+    # --cached still lists files deleted or renamed in the working tree but not yet staged. Drop only those,
+    # so any other listed file that cannot be read fails the step instead of being skipped.
+    $deletedOutput = & git -C $repositoryRoot -c core.quotePath=false ls-files -z --deleted -- '*.ps1' '*.psm1'
+    $deletedExitCode = $LASTEXITCODE
+}
+finally
+{
+    [Console]::OutputEncoding = $consoleEncoding
+}
+if ($listedExitCode -ne 0 -or $deletedExitCode -ne 0)
 {
     Add-StepResult -Name 'PS5.1 parse' -Status FAIL -Detail 'git could not list the repository files'
 }
 else
 {
-    # --cached still lists files deleted or renamed in the working tree but not yet staged; skip them.
-    $ps51Files = @($inventory | Where-Object {
-            $path = Join-Path -Path $repositoryRoot -ChildPath $_
-            (Test-Path -LiteralPath $path -PathType Leaf) -and
-            (Select-String -LiteralPath $path -Pattern '^#Requires -Version 5\.1' -Quiet)
-        })
-    if ($ps51Files.Count -eq 0)
+    $deletedPaths = @(($deletedOutput -join "`n") -split "`0")
+    $inventory = @(($listedOutput -join "`n") -split "`0" | Where-Object { $_ -and $_ -cnotin $deletedPaths })
+    $ps51Files = [System.Collections.Generic.List[string]]::new()
+    $unreadableCount = 0
+    foreach ($path in $inventory)
+    {
+        try
+        {
+            if (Select-String -LiteralPath (Join-Path -Path $repositoryRoot -ChildPath $path) `
+                    -Pattern '^#Requires -Version 5\.1' -Quiet -ErrorAction Stop)
+            {
+                $ps51Files.Add($path)
+            }
+        }
+        catch
+        {
+            $unreadableCount++
+            Write-Output ('  {0}: {1}' -f $path, $_.Exception.Message)
+        }
+    }
+    if ($unreadableCount -gt 0)
+    {
+        Add-StepResult -Name 'PS5.1 parse' -Status FAIL -Detail "$unreadableCount listed file(s) could not be read"
+    }
+    elseif ($ps51Files.Count -eq 0)
     {
         Add-StepResult -Name 'PS5.1 parse' -Status FAIL -Detail 'no files marked #Requires -Version 5.1'
     }
