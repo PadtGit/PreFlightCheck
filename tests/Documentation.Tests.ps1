@@ -7,17 +7,28 @@ Describe 'Documentation links' {
         function Get-GitFile {
             <#
             .SYNOPSIS
-                Runs git ls-files with the given arguments and returns the listed files that exist, in Git's casing.
+                Runs git ls-files with the given arguments and returns the listed files not deleted in the working
+                tree, in Git's casing.
             #>
             param ([string[]]$Argument)
-            $paths = @(& git -C $script:repositoryRoot -c core.quotePath=false ls-files $Argument)
-            if ($LASTEXITCODE -ne 0) {
-                throw "git ls-files $($Argument -join ' ') failed with exit code $LASTEXITCODE."
+            # -z with core.quotePath=false prints names unquoted; read them as UTF-8, not the console code page.
+            $consoleEncoding = [Console]::OutputEncoding
+            try {
+                [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+                $listedOutput = & git -C $script:repositoryRoot -c core.quotePath=false ls-files -z $Argument
+                $listedExitCode = $LASTEXITCODE
+                $deletedOutput = & git -C $script:repositoryRoot -c core.quotePath=false ls-files -z --deleted
+                $deletedExitCode = $LASTEXITCODE
             }
-            # ls-files still lists files deleted in the working tree; keep only files that exist.
-            $paths | Where-Object {
-                Test-Path -LiteralPath (Join-Path -Path $script:repositoryRoot -ChildPath $_) -PathType Leaf
+            finally {
+                [Console]::OutputEncoding = $consoleEncoding
             }
+            if ($listedExitCode -ne 0 -or $deletedExitCode -ne 0) {
+                throw "git ls-files $($Argument -join ' ') failed with exit codes $listedExitCode and $deletedExitCode."
+            }
+            # ls-files still lists files deleted in the working tree; drop only those.
+            $deletedPaths = @(($deletedOutput -join "`n") -split "`0")
+            ($listedOutput -join "`n") -split "`0" | Where-Object { $_ -and $_ -cnotin $deletedPaths }
         }
 
         function Get-UnfencedText {
