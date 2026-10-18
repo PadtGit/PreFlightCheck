@@ -59,7 +59,7 @@ function Get-GuiResultPresentation {
         return [pscustomobject]@{
             State = 'CleanupLocked'
             StatusLabel = "CLEANUP LOCKED — $conditionLabel stopped the guided run"
-            NextAction = 'Select Show details to inspect each condition. Cleanup stays locked until a guided run''s health check finishes with no review results.'
+            NextAction = 'Select Show details to inspect each condition. Cleanup stays locked until a normal Windows health check finishes with no review results.'
         }
     }
     if ($ExitCode -eq 0) {

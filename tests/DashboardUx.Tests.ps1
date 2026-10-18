@@ -81,7 +81,8 @@ Describe 'Dashboard result presentation' {
 
         $locked.State | Should -Be 'CleanupLocked'
         $locked.StatusLabel | Should -Be 'CLEANUP LOCKED — 2 review conditions stopped the guided run'
-        $locked.NextAction | Should -Match 'Show details.*guided run.*no review results'
+        $locked.NextAction | Should -Match 'Show details.*normal Windows health check finishes with no review results'
+        $locked.NextAction | Should -Not -Match 'guided run' -Because 'a standalone health check can also unlock cleanup'
         $single.StatusLabel | Should -Be 'CLEANUP LOCKED — 1 review condition stopped the guided run'
         $restart.State | Should -Be 'Restart'
         $repair.State | Should -Be 'Repair'
