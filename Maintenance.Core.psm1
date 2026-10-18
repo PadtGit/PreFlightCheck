@@ -50,8 +50,14 @@ function Get-VolumeSpaceAssessment {
     }
     $status = 'Observed'
     if ($free -lt $minimumFreeBytes) { $status = 'Review' }
-    $detail = '{0} volume {1}: {2:N1} MiB free of {3:N1} MiB filesystem capacity. ' -f
-        $role, $volumeId, ($free / 1MB), ($size / 1MB)
+    $location = "volume $volumeId"
+    if ($matchingPartitions.Count -eq 1 -and
+        $null -ne $matchingPartitions[0].PSObject.Properties['DiskNumber'] -and $null -ne $matchingPartitions[0].DiskNumber -and
+        $null -ne $matchingPartitions[0].PSObject.Properties['PartitionNumber'] -and $null -ne $matchingPartitions[0].PartitionNumber) {
+        $location = "partition (disk $($matchingPartitions[0].DiskNumber), partition $($matchingPartitions[0].PartitionNumber))"
+    }
+    $detail = '{0} {1}: {2:N1} MiB free of {3:N1} MiB filesystem capacity. ' -f
+        $role, $location, ($free / 1MB), ($size / 1MB)
     switch ($role) {
         'EFI' { $detail += 'EFI project caution threshold: 50 MiB; this is not a Windows update requirement.' }
         'Recovery' { $detail += 'Windows RE servicing allowance: 250 MiB; low space does not establish image corruption or backup failure.' }
@@ -66,6 +72,29 @@ function Get-VolumeSpaceAssessment {
         $detail += ' The filesystem is unavailable or unexpected for this partition purpose; review storage.'
     }
     [pscustomobject]@{ Status = $status; Detail = $detail }
+}
+
+function Get-EventSourceSummary {
+    <#
+    .SYNOPSIS
+    Names the most frequent event sources so an event review shows where to look first.
+    .PARAMETER EventRecord
+    Event records with ProviderName and Id, as returned by Get-WinEvent.
+    .PARAMETER Top
+    Number of source and event ID pairs to name.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyCollection()][object[]]$EventRecord = @(),
+        [ValidateRange(1, 20)][int]$Top = 3
+    )
+    $groups = @($EventRecord | Where-Object { $null -ne $_ } |
+        Group-Object -Property { '{0} {1}' -f $_.ProviderName, $_.Id } |
+        Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Descending = $false } |
+        Select-Object -First $Top)
+    if ($groups.Count -eq 0) { return '' }
+    'Most frequent: ' + (@($groups | ForEach-Object { '{0} ({1})' -f $_.Name, $_.Count }) -join ', ') + '.'
 }
 
 function Get-PendingRestartState {
@@ -431,4 +460,4 @@ function Remove-AgedTemporaryFile {
     [pscustomobject]@{ Root = $Root; Deleted = $deleted; Skipped = $skipped; Failed = $failed; LogicalBytesDeleted = $bytes }
 }
 
-Export-ModuleMember -Function Get-VolumeSpaceAssessment, Get-PendingRestartState, Get-AcPowerState, Get-ReportReviewFinding, Get-GuidedRunDisposition, Get-ReportFailureMessage, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile
+Export-ModuleMember -Function Get-VolumeSpaceAssessment, Get-EventSourceSummary, Get-PendingRestartState, Get-AcPowerState, Get-ReportReviewFinding, Get-GuidedRunDisposition, Get-ReportFailureMessage, Test-ContainedRegularPath, Get-AgedTemporaryFile, Remove-AgedTemporaryFile

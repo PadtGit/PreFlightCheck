@@ -26,7 +26,7 @@ For contributors, see [CONTRIBUTING.md](CONTRIBUTING.md) for the exact local tes
 - Application updates: preview WinGet updates and select exact application IDs.
 - Dell review: attended BIOS and driver review specifically for the **Dell G5 5590**.
 - Guided run: enforces review → health → update preview → cleanup preview → cleanup → final review, and stops before cleanup when repair or restart is required.
-- Guided review summary: carries each step's review findings into the final dashboard result, with the affected check and report location. A completed sequence with findings returns exit code 2.
+- Guided review summary: carries each step's review findings into the final dashboard result, with the affected check and report location, listing each check once from the latest step that reported it. A completed sequence with findings returns exit code 2; a run stopped by health review conditions shows `CLEANUP LOCKED`.
 - Live dashboard activity across all checks: shows the current operation, elapsed time, and recent worker output. Native tools such as DISM, SFC, CHKDSK, VSS, and WinGet stream their output during execution. A tool-provided percentage appears when available; other checks show an activity indicator. Complete output stays in `console.txt` and native-tool logs, with concise status and result-opening actions after completion.
 
 This initial toolkit was tailored to a Dell G5 5590. Review suitability before using it on another computer; the Dell helper rejects other models.

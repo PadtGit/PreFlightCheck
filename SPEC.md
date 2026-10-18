@@ -241,7 +241,9 @@ Exit codes (maintenance entry point, guided run, and worker; the worker returns 
 - Every maintenance step is recorded with status `Observed`, `Completed`, `Review`, `Skipped`, or `Failed`.
   Any `Failed` gives `1`; otherwise any `Review` gives `2`; otherwise `0`. The final console line and the exit
   code come from the same decision.
-- The dashboard shows `RESTART` or `REPAIR` ahead of the exit-code state when those flags are set.
+- The dashboard shows `RESTART` or `REPAIR` ahead of the exit-code state when those flags are set. A guided
+  run that stops at the health gate only because of review conditions shows `CLEANUP LOCKED` with the number
+  of health-step review findings; its exit code stays `1`.
 - `report.json` and `steps.csv` (maintenance), `guided-result.json`, `guided-steps.csv`, and `guided-run.log`
   (guided run), `finished.json`, `summary.txt`, `details.txt`, and `console.txt` (worker), and `session.log`
   (dashboard header, worker summaries) are compatibility contracts. Their producers and consumers change

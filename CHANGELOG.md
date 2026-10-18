@@ -7,6 +7,7 @@
 - Added documentation tests that check relative links and section anchors in tracked Markdown, the `CLAUDE.md` imports, and that the `README.md` version line and newest `CHANGELOG.md` release match `VERSION`.
 - Re-ran the Claude Code Stop verification after a rebase onto a changed base branch instead of reusing the earlier pass, and kept the full analyzer running when a tracked script is deleted or renamed but not yet staged. The analyzer now also checks scripts with non-ASCII file names instead of failing on them.
 - Parsed Windows PowerShell 5.1 scripts with non-ASCII file names in local verification instead of silently skipping them, and failed the parse step with the summary intact when a listed script cannot be read; the documentation tests likewise keep non-ASCII Markdown file names under OEM console code pages.
+- Showed a guided run that stops on health review conditions as `CLEANUP LOCKED` with the number of conditions, instead of a generic `ACTION NEEDED`; the exit code stays 1. Listed each review check once in the dashboard result, from the latest guided step that reported it, instead of once per step. Named the most frequent event sources and the `events.csv` path in event reviews, and the recovery or EFI partition by disk and partition number in space reviews. The cleanup gate is unchanged.
 - Corrected the repository skills and analyzer documentation to use `Write-Information` instead of `Write-Host` for status lines and to require zero release-blocking findings and zero engine errors for an analyzer pass.
 
 ## 0.4.3 - 2026-10-03

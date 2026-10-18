@@ -201,6 +201,20 @@ Describe 'Guided review findings' {
         $findings[1].Detail | Should -Be 'Restart pending'
     }
 
+    It 'names the most frequent event sources for an event review' {
+        $events = @(
+            @(1..5 | ForEach-Object { [pscustomobject]@{ ProviderName = 'Service Control Manager'; Id = 7023 } })
+            @(1..2 | ForEach-Object { [pscustomobject]@{ ProviderName = 'nhi'; Id = 9006 } })
+            [pscustomobject]@{ ProviderName = 'Application Error'; Id = 1000 }
+            [pscustomobject]@{ ProviderName = 'Service Control Manager'; Id = 7000 }
+            $null
+        )
+
+        Get-EventSourceSummary -EventRecord $events | Should -Be 'Most frequent: Service Control Manager 7023 (5), nhi 9006 (2), Application Error 1000 (1).'
+        Get-EventSourceSummary -EventRecord $events -Top 1 | Should -Be 'Most frequent: Service Control Manager 7023 (5).'
+        Get-EventSourceSummary -EventRecord @() | Should -Be ''
+    }
+
     It 'marks a review exit with no matching findings as needing inspection' {
         $report = [pscustomobject]@{ Results = @([pscustomobject]@{ Step = 'System'; Status = 'Observed'; Detail = 'Collected' }) }
 

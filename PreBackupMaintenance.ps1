@@ -149,7 +149,7 @@ try {
             $WhatIfPreference = $false
             $report.VolumesBefore = @(Get-Volume | Select-Object DriveLetter,UniqueId,FileSystem,DriveType,Size,SizeRemaining,HealthStatus)
             $report.Disks = @(Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,OperationalStatus)
-            $partitions = @(Get-Partition -ErrorAction Stop | Select-Object AccessPaths,GptType)
+            $partitions = @(Get-Partition -ErrorAction Stop | Select-Object AccessPaths,GptType,DiskNumber,PartitionNumber)
         } finally { $WhatIfPreference = $savedWhatIf }
         if ($report.Disks.Count -eq 0 -or $report.VolumesBefore.Count -eq 0) { throw 'Storage inventory returned no data.' }
         foreach ($disk in $report.Disks) {
@@ -171,8 +171,12 @@ try {
     try {
         Write-Information -MessageData '[RUNNING] Events: Reviewing recent system and application errors...' -InformationAction Continue
         $events = @(Get-WinEvent -FilterHashtable @{ LogName = @('System','Application'); Level = @(1,2); StartTime = (Get-Date).AddDays(-3) } -MaxEvents 100 -ErrorAction Stop)
-        $events | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | Export-Csv -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'events.csv') -NoTypeInformation -Encoding UTF8 -WhatIf:$false
-        Add-Result -Step Events -Status Review -Detail "$($events.Count) recent error/critical events captured (maximum 100); occurrence alone is not proof of corruption."
+        $eventsPath = Join-Path -Path $runDirectory -ChildPath 'events.csv'
+        $events | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | Export-Csv -LiteralPath $eventsPath -NoTypeInformation -Encoding UTF8 -WhatIf:$false
+        $eventDetail = "$($events.Count) recent error/critical events captured (maximum 100); occurrence alone is not proof of corruption."
+        $eventSources = Get-EventSourceSummary -EventRecord $events
+        if ($eventSources) { $eventDetail += " $eventSources" }
+        Add-Result -Step Events -Status Review -Detail "$eventDetail Full list: $eventsPath"
     } catch {
         if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { Add-Result -Step Events -Status Observed -Detail 'No matching recent events.' }
         else { Add-Result -Step Events -Status Failed -Detail $_.Exception.Message }

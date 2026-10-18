@@ -42,7 +42,7 @@ AfterAll {
 
 Describe 'Dashboard core module' {
     It 'exports the pure dashboard and worker presentation helpers' {
-        foreach ($name in @('Get-DashboardStateStyle','Get-GuiResultPresentation','Get-GuiResultEvidence','Format-GuiTaskSummary','Format-GuiTaskDetail','Get-LiveActivityState','Get-LiveActivityText')) {
+        foreach ($name in @('Get-DashboardStateStyle','Get-GuiResultPresentation','Merge-GuiReviewFinding','Get-GuidedHealthReviewCount','Get-GuiResultEvidence','Format-GuiTaskSummary','Format-GuiTaskDetail','Get-LiveActivityState','Get-LiveActivityText')) {
             (Get-Command -Name $name -Module Dashboard.Core -ErrorAction Stop).Name | Should -Be $name
         }
     }
@@ -70,6 +70,103 @@ Describe 'Dashboard result presentation' {
         $action.StatusLabel | Should -Be 'ACTION NEEDED — Task stopped (exit code 1)'
         $review.State | Should -Be 'Review'
         $review.StatusLabel | Should -Be 'REVIEW — 2 findings need attention'
+    }
+
+    It 'shows a guided health-review stop as cleanup locked while keeping exit code 1' {
+        $locked = Get-GuiResultPresentation -ExitCode 1 -ReviewFindingCount 3 -HealthReviewCount 2
+        $single = Get-GuiResultPresentation -ExitCode 1 -ReviewFindingCount 1 -HealthReviewCount 1
+        $restart = Get-GuiResultPresentation -ExitCode 1 -RestartRequired $true -ReviewFindingCount 2 -HealthReviewCount 2
+        $repair = Get-GuiResultPresentation -ExitCode 1 -RepairRecommended $true -ReviewFindingCount 2 -HealthReviewCount 2
+        $stopped = Get-GuiResultPresentation -ExitCode 1 -ReviewFindingCount 2
+
+        $locked.State | Should -Be 'CleanupLocked'
+        $locked.StatusLabel | Should -Be 'CLEANUP LOCKED — 2 review conditions stopped the guided run'
+        $locked.NextAction | Should -Match 'Show details.*guided run.*no review results'
+        $single.StatusLabel | Should -Be 'CLEANUP LOCKED — 1 review condition stopped the guided run'
+        $restart.State | Should -Be 'Restart'
+        $repair.State | Should -Be 'Repair'
+        $stopped.State | Should -Be 'ActionNeeded' -Because 'other guided stops keep the generic label'
+        (Get-DashboardStateStyle -State $locked.State).Foreground | Should -Be '#F3C87F'
+    }
+
+    It 'counts only the health-step review conditions of a guided stop at the health gate' {
+        $steps = @(
+            [pscustomobject]@{ Step = '01-SystemReview'; ExitCode = 2; Report = 'C:\fixture\01' },
+            [pscustomobject]@{ Step = '02-WindowsHealth'; ExitCode = 2; Report = 'C:\fixture\02' }
+        )
+        $findings = @(
+            [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Space'; Detail = 'Recovery 114.8 MiB'; Report = 'C:\fixture\01\report.json' },
+            [pscustomobject]@{ Step = '01-SystemReview'; Check = 'TempInventory'; Detail = 'Access denied'; Report = 'C:\fixture\01\report.json' },
+            [pscustomobject]@{ Step = '02-WindowsHealth'; Check = 'Space'; Detail = 'Recovery 114.7 MiB'; Report = 'C:\fixture\02\report.json' },
+            [pscustomobject]@{ Step = '02-WindowsHealth'; Check = 'Events'; Detail = '100 events'; Report = 'C:\fixture\02\report.json' }
+        )
+        $stopped = [pscustomobject]@{ Completed = $false; RestartRequired = $false; RepairRecommended = $false; HealthReady = $false; Steps = $steps; ReviewFindings = $findings }
+        Get-GuidedHealthReviewCount -GuidedResult $stopped | Should -Be 2
+
+        foreach ($flag in @('Completed','RestartRequired','RepairRecommended','HealthReady')) {
+            $copy = $stopped.PSObject.Copy()
+            $copy.$flag = $true
+            Get-GuidedHealthReviewCount -GuidedResult $copy | Should -Be 0 -Because "$flag is set"
+        }
+        $failedHealth = $stopped.PSObject.Copy()
+        $failedHealth.Steps = @($steps[0], [pscustomobject]@{ Step = '02-WindowsHealth'; ExitCode = 1; Report = 'C:\fixture\02' })
+        Get-GuidedHealthReviewCount -GuidedResult $failedHealth | Should -Be 0
+        $reviewOnly = $stopped.PSObject.Copy()
+        $reviewOnly.Steps = @($steps[0])
+        Get-GuidedHealthReviewCount -GuidedResult $reviewOnly | Should -Be 0
+        $malformedStep = $stopped.PSObject.Copy()
+        $malformedStep.Steps = @([pscustomobject]@{ Report = 'C:\fixture\02' })
+        Get-GuidedHealthReviewCount -GuidedResult $malformedStep | Should -Be 0
+        Get-GuidedHealthReviewCount -GuidedResult $null | Should -Be 0
+        Get-GuidedHealthReviewCount -GuidedResult ([pscustomobject]@{ Message = 'legacy' }) | Should -Be 0
+    }
+
+    It 'shows each check once from the latest step that reported it' {
+        $findings = @(
+            [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Space'; Detail = 'Recovery 114.8 MiB'; Report = 'C:\fixture\01\report.json' },
+            [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Space'; Detail = 'Data C: 900 MiB'; Report = 'C:\fixture\01\report.json' },
+            [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Events'; Detail = '100 events. Full list: C:\fixture\01\events.csv'; Report = 'C:\fixture\01\report.json' },
+            [pscustomobject]@{ Step = '01-SystemReview'; Check = 'TempInventory'; Detail = 'Access denied'; Report = 'C:\fixture\01\report.json' },
+            [pscustomobject]@{ Step = '02-WindowsHealth'; Check = 'Space'; Detail = 'Recovery 114.7 MiB'; Report = 'C:\fixture\02\report.json' },
+            [pscustomobject]@{ Step = '02-WindowsHealth'; Check = 'Events'; Detail = '98 events. Full list: C:\fixture\02\events.csv'; Report = 'C:\fixture\02\report.json' },
+            [pscustomobject]@{ Step = '03-WinGetPreview'; Check = 'Report'; Detail = 'Review the saved report'; Report = 'C:\fixture\03\report.json' },
+            [pscustomobject]@{ Step = '04-CleanupPreview'; Check = 'Report'; Detail = 'Review the saved report'; Report = 'C:\fixture\04\report.json' },
+            $null
+        )
+        $merged = @(Merge-GuiReviewFinding -Finding $findings)
+
+        $merged.Count | Should -Be 5
+        $merged[0].Step | Should -Be '01-SystemReview' -Because 'a check no later step reported stays visible'
+        $merged[0].Check | Should -Be 'TempInventory'
+        $merged[1].Step | Should -Be '01-SystemReview, 02-WindowsHealth'
+        $merged[1].Detail | Should -Be 'Recovery 114.7 MiB'
+        $merged[1].Report | Should -Be 'C:\fixture\02\report.json'
+        $merged[2].Detail | Should -Match '^98 events'
+        @($merged | Where-Object { $_.Detail -like 'Data C:*' }).Count | Should -Be 0 -Because 'the health step re-ran the Space check without it'
+        @($merged | Where-Object { $_.Check -eq 'Report' }).Step | Should -Be @('03-WinGetPreview','04-CleanupPreview')
+        $findings[4].Step | Should -Be '02-WindowsHealth' -Because 'the saved guided findings stay unchanged'
+        @(Merge-GuiReviewFinding -Finding @()).Count | Should -Be 0
+    }
+
+    It 'shows one condition per check in the saved summary and details of a health-review stop' {
+        $finding = [pscustomobject]@{ Step = '01-SystemReview'; Check = 'Space'; Detail = 'Recovery 114.8 MiB'; Report = 'C:\fixture\01\report.json' }
+        $repeat = [pscustomobject]@{ Step = '02-WindowsHealth'; Check = 'Space'; Detail = 'Recovery 114.7 MiB'; Report = 'C:\fixture\02\report.json' }
+        $guided = [pscustomobject]@{
+            Message = 'HEALTH REVIEW REQUIRED: open the health report.'; Completed = $false; RestartRequired = $false; RepairRecommended = $false; HealthReady = $false
+            Steps = @([pscustomobject]@{ Step = '01-SystemReview'; ExitCode = 2 }, [pscustomobject]@{ Step = '02-WindowsHealth'; ExitCode = 2 })
+            ReviewFindings = @($finding, $repeat)
+        }
+        $evidence = Get-GuiResultEvidence -Task PreBackupRun -ExitCode 1 -GuidedResult $guided
+        $presentation = Get-GuiResultPresentation -ExitCode 1 -ReviewFindingCount @($evidence.Findings).Count -HealthReviewCount (Get-GuidedHealthReviewCount -GuidedResult $guided)
+        $parameters = @{ Presentation = $presentation; Task = 'PreBackupRun'; Finished = [datetime]'2026-10-18T02:00:28'; ExitCode = 1; Evidence = $evidence; RunDirectory = 'C:\fixture\run'; ConsolePath = 'C:\fixture\run\console.txt' }
+        $summary = Format-GuiTaskSummary @parameters
+        $details = Format-GuiTaskDetail @parameters
+
+        $summary | Should -Match '^CLEANUP LOCKED — 1 review condition stopped the guided run'
+        $summary | Should -Match 'Exit code: 1 \(stopped or failed\)'
+        $summary | Should -Match '1 finding in the saved reports'
+        $details | Should -Match '- 01-SystemReview, 02-WindowsHealth / Space: Recovery 114\.7 MiB'
+        $details | Should -Not -Match '114\.8'
     }
 
     It 'keeps the final summary concise and points to detailed output and finding reports' {

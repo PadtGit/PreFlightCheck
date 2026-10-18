@@ -150,6 +150,8 @@ function Update-CleanupAvailability {
         if (-not $taskRunning) {
             if ($script:taskState -in @('Restart','Repair','ActionNeeded','Review')) {
                 Set-DashboardStatus -State $script:taskState -Label ('CLEANUP LOCKED - ' + $script:taskStatus) -PresentationOnly
+            } elseif ($script:taskState -eq 'CleanupLocked') {
+                Set-DashboardStatus -State CleanupLocked -Label $script:taskStatus -PresentationOnly
             } else {
                 Set-DashboardStatus -State CleanupLocked -PresentationOnly
             }
