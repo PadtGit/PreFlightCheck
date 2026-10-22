@@ -46,6 +46,23 @@ Describe 'Partition-aware space assessment' {
         $result.Detail | Should -Match 'servicing.*250'
     }
 
+    It 'names the disk and partition when the inventory provides them' {
+        $partition.GptType = $recoveryType
+        $partition | Add-Member -NotePropertyName DiskNumber -NotePropertyValue 0
+        $partition | Add-Member -NotePropertyName PartitionNumber -NotePropertyValue 4
+        $volume.FileSystem = 'NTFS'; $volume.Size = 787MB; $volume.SizeRemaining = 115MB
+        $result = Get-VolumeSpaceAssessment -Volume $volume -Partitions @($partition)
+        $result.Detail | Should -Match '^Recovery partition \(disk 0, partition 4\): 115\.0 MiB free'
+        $result.Detail | Should -Not -Match 'Volume\{'
+    }
+
+    It 'falls back to the volume path when the partition numbers are unavailable' {
+        $partition | Add-Member -NotePropertyName DiskNumber -NotePropertyValue $null
+        $partition | Add-Member -NotePropertyName PartitionNumber -NotePropertyValue 1
+        (Get-VolumeSpaceAssessment -Volume $volume -Partitions @($partition)).Detail | Should -Match ('^EFI volume ' + [regex]::Escape($volumeId))
+        (Get-VolumeSpaceAssessment -Volume $volume -Partitions @($partition, $partition)).Detail | Should -Match ('^Unresolved volume ' + [regex]::Escape($volumeId))
+    }
+
     It 'uses an exact byte boundary for <Role> at offset <Offset>' -ForEach @(
         @{ Role = 'Efi'; Threshold = 50MB; Offset = -1; Expected = 'Review' }
         @{ Role = 'Efi'; Threshold = 50MB; Offset = 0; Expected = 'Observed' }

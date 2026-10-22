@@ -154,7 +154,10 @@ if (Test-Path -LiteralPath $guidedResultPath) {
     $reviewFindings = @($guidedResult.ReviewFindings)
 }
 $finishedAt = [datetime]::Now
-$presentation = Get-GuiResultPresentation -ExitCode $exitCode -RestartRequired $restartRequired -RepairRecommended $repairRecommended -ReviewFindingCount $reviewFindings.Count
+$reviewConditionCount = @(Merge-GuiReviewFinding -Finding $reviewFindings).Count
+$healthReviewCount = 0
+if ($request.Task -eq 'PreBackupRun') { $healthReviewCount = Get-GuidedHealthReviewCount -GuidedResult $guidedResult }
+$presentation = Get-GuiResultPresentation -ExitCode $exitCode -RestartRequired $restartRequired -RepairRecommended $repairRecommended -ReviewFindingCount $reviewConditionCount -HealthReviewCount $healthReviewCount
 $reportPath = if ($machineReport) { $machineReport.FullName } else { '' }
 $evidence = Get-GuiResultEvidence -Task $request.Task -ExitCode $exitCode -Report $machineResult -ReportPath $reportPath -GuidedResult $guidedResult -ConsolePath $consolePath
 $formatArgs = @{ Presentation = $presentation; Task = $request.Task; Finished = $finishedAt; ExitCode = $exitCode; Evidence = $evidence; RunDirectory = $runDirectory; ConsolePath = $consolePath }

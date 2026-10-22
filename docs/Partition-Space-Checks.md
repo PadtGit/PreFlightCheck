@@ -25,7 +25,10 @@ qualify for the smaller thresholds. A partition enumeration error produces a
 `Storage` failure. Non-fixed volumes are outside this assessment.
 
 Each assessment uses the existing `Space` result with `Status` and `Detail`;
-`Add-Result` adds the normal timestamp and step. EFI and recovery observations stay
+`Add-Result` adds the normal timestamp and step. The detail names the partition by disk
+and partition number when the single matching partition reports them, for example
+`Recovery partition (disk 0, partition 4)`, and otherwise falls back to the volume
+path. EFI and recovery observations stay
 in `report.json` and `steps.csv` even when they do not request review. No report
 schema, event classification, exit-code mapping, or cleanup gate changes are
 required. Every review or failure still blocks cleanup. This check does not

@@ -590,6 +590,23 @@ Describe 'Cleanup action availability' {
         $Status.Text | Should -BeLike "$Warning*"
     }
 
+    It 'keeps cleanup locked and shows the saved label after a guided health-review stop' {
+        Mock Show-DashboardWarning { }
+        $label = 'CLEANUP LOCKED — 2 review conditions stopped the guided run'
+        Show-Page -Page Cleanup
+        $script:active = [pscustomobject]@{ HasExited = $true }
+        $script:active | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        @{ Task = 'PreBackupRun'; ExitCode = 1; DisplayState = 'CleanupLocked'; StatusLabel = $label; HealthReady = $false; RestartRequired = $false; RepairRecommended = $false } | ConvertTo-Json | Set-Content (Join-Path $runDirectory 'finished.json') -Encoding utf8
+        & $completionHandler
+        $script:healthReady | Should -BeFalse
+        $Apply.IsEnabled | Should -BeFalse
+        $Status.Text | Should -Be $label
+        $ShowDetails.IsEnabled | Should -BeFalse -Because 'no details.txt was saved in this fixture'
+        Should -Invoke Show-DashboardWarning -Times 0
+        Show-Page -Page Health
+        $Status.Text | Should -Be $label
+    }
+
     It 'relocks cleanup after <Task> exits with code <Code>' -ForEach @(
         @{ Task = 'SystemRepair'; Code = 0 }
         @{ Task = 'HealthRepair'; Code = 0 }

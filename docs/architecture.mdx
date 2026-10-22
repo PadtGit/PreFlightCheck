@@ -183,7 +183,7 @@ is shown as a problem, never assumed to be success.
 ### Maintenance and Shared Logic
 
 `PreBackupMaintenance.ps1` runs `Audit`, `Clean`, `Health`, `SystemRepair`, and `Updates`.
-`Maintenance.Core.psm1` supplies `Get-VolumeSpaceAssessment`, `Get-PendingRestartState`, `Get-AcPowerState`, the guided-run findings and
+`Maintenance.Core.psm1` supplies `Get-VolumeSpaceAssessment`, `Get-EventSourceSummary`, `Get-PendingRestartState`, `Get-AcPowerState`, the guided-run findings and
 disposition (`Get-ReportReviewFinding`, `Get-GuidedRunDisposition`, `Get-ReportFailureMessage`), and the
 guarded Temp-file helpers.
 
@@ -218,9 +218,9 @@ ends after this common work and final reporting; the other modes use it for cont
 | Windows, model, BIOS, host | Registry values and current process identity; saved in `System`. |
 | Restart | `Get-PendingRestartState` checks Component Servicing, Windows Update, and pending file renames. Inaccessible checks are recorded in `Unknown`. Clear markers do not prove Windows Update is idle. |
 | AC power | `Get-AcPowerState` calls the Windows power-status API. Unknown AC state cannot authorize maintenance. |
-| Storage | `Get-PhysicalDisk` and `Get-Volume` populate disk/volume inventory. `Get-Partition` supplies access paths and GPT types to `Get-VolumeSpaceAssessment`. Missing inventory fails the check; abnormal disk health and insufficient space produce findings. EFI uses a 50 MiB project caution threshold, recovery uses a 250 MiB servicing allowance, and ordinary or unresolved partitions retain 1 GiB. All fixed-volume assessments remain visible. See [partition space checks](Partition-Space-Checks.md) for classification and sources. |
+| Storage | `Get-PhysicalDisk` and `Get-Volume` populate disk/volume inventory. `Get-Partition` supplies access paths, GPT types, and disk and partition numbers to `Get-VolumeSpaceAssessment`. Missing inventory fails the check; abnormal disk health and insufficient space produce findings. EFI uses a 50 MiB project caution threshold, recovery uses a 250 MiB servicing allowance, and ordinary or unresolved partitions retain 1 GiB. All fixed-volume assessments remain visible. See [partition space checks](Partition-Space-Checks.md) for classification and sources. |
 | VSS | Elevated runs collect writer and shadow-storage output through `vssadmin`. Non-elevated runs record a review finding. This is diagnostic output, not a backup restore test. |
-| Events | Up to 100 error/critical events from System and Application over the previous three days; saved to `events.csv` for review. |
+| Events | Up to 100 error/critical events from System and Application over the previous three days; saved to `events.csv` for review. The `Review` detail names the three most frequent source and event ID pairs (`Get-EventSourceSummary`) and the `events.csv` path. |
 | Defender | Protection and signature observations in `defender.json`; unavailable status requests review, and passive mode may reflect another antivirus product. |
 | Temp candidates | Aged regular-file inventory from the two permitted roots, with enumeration warnings preserved. |
 | Final space | A second volume inventory produces `VolumesAfter` and `SpaceChange`; net free-space movement is not a precise measure of bytes deleted by this process. |
@@ -525,6 +525,13 @@ An empty worker array therefore does not prove a standalone task has no findings
 | `2` | Review required, including a completed guided run with findings | `REVIEW` | `REVIEW` |
 
 `Get-GuiResultPresentation` shows `RESTART` or `REPAIR` ahead of the exit-code state when those flags are set.
+When a guided run stops at the health gate only because of review conditions (not completed, no restart or
+repair, health not ready, and `02-WindowsHealth` is the last step with exit code `2`), it shows
+`CLEANUP LOCKED` with the number of health-step review findings (`Get-GuidedHealthReviewCount`) instead of
+`ACTION NEEDED`; the exit code stays `1`. Because every guided step runs the shared system checks again, the
+dashboard summary and details show each check once, from the latest step that reported it, and list every
+step that reported it (`Merge-GuiReviewFinding`). The synthetic `Report` finding is per step and always kept.
+`guided-result.json` and the `finished.json` `ReviewFindings` array keep every step's finding unchanged.
 Health readiness is a separate gate. A zero exit code neither proves the backup will restore nor lets anything
 skip the cleanup prerequisites, and it must not become an automatic Veeam backup veto.
 

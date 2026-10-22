@@ -64,6 +64,18 @@ Describe 'Cleanup status text and colors' {
         $Status.Text | Should -Be $taskLabel
     }
 
+    It 'keeps a guided health-review stop label without repeating the locked prefix' {
+        $label = 'CLEANUP LOCKED — 2 review conditions stopped the guided run'
+        Set-DashboardStatus -State CleanupLocked -Label $label
+        Update-CleanupAvailability
+        Update-CleanupAvailability
+        $Status.Text | Should -Be $label
+        $Status.Foreground.ToString() | Should -Be '#FFF3C87F'
+        $script:lastPage = 'Audit'
+        Update-CleanupAvailability
+        $Status.Text | Should -Be $label
+    }
+
     It 'keeps the running task presentation while cleanup is unavailable' {
         Set-DashboardStatus -State Running
         $script:active = [pscustomobject]@{ HasExited = $false }

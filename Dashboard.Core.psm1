@@ -36,7 +36,8 @@ function Get-GuiResultPresentation {
         [Parameter(Mandatory)][int]$ExitCode,
         [bool]$RestartRequired = $false,
         [bool]$RepairRecommended = $false,
-        [ValidateRange(0, [int]::MaxValue)][int]$ReviewFindingCount = 0
+        [ValidateRange(0, [int]::MaxValue)][int]$ReviewFindingCount = 0,
+        [ValidateRange(0, [int]::MaxValue)][int]$HealthReviewCount = 0
     )
 
     if ($RestartRequired) {
@@ -51,6 +52,14 @@ function Get-GuiResultPresentation {
             State = 'Repair'
             StatusLabel = 'REPAIR — Windows repair recommended'
             NextAction = 'Open the health report and run Repair Windows before cleanup.'
+        }
+    }
+    if ($HealthReviewCount -gt 0 -and $ExitCode -ne 0) {
+        $conditionLabel = if ($HealthReviewCount -eq 1) { '1 review condition' } else { "$HealthReviewCount review conditions" }
+        return [pscustomobject]@{
+            State = 'CleanupLocked'
+            StatusLabel = "CLEANUP LOCKED — $conditionLabel stopped the guided run"
+            NextAction = 'Select Show details to inspect each condition. Cleanup stays locked until a normal Windows health check finishes with no review results.'
         }
     }
     if ($ExitCode -eq 0) {
@@ -74,6 +83,66 @@ function Get-GuiResultPresentation {
         StatusLabel = "ACTION NEEDED — Task stopped (exit code $ExitCode)"
         NextAction = 'Open the saved result and detailed console output before retrying.'
     }
+}
+
+function Merge-GuiReviewFinding {
+    <#
+    .SYNOPSIS
+        Shows each guided review check once, using the latest step that reported it.
+    .DESCRIPTION
+        Every guided step runs the shared system checks again, so a later step's findings for a check
+        supersede an earlier step's, even when counts or free space changed slightly in between. Each
+        kept finding lists every step that reported its check. The synthetic Report finding describes
+        one step's own report and is always kept. The input findings are not modified.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([AllowEmptyCollection()][object[]]$Finding = @())
+
+    $items = @($Finding | Where-Object { $null -ne $_ })
+    $latestStep = @{}
+    $reportingSteps = @{}
+    foreach ($item in $items) {
+        $check = [string]$item.Check
+        if ($check -eq 'Report') { continue }
+        $latestStep[$check] = [string]$item.Step
+        if (-not $reportingSteps.ContainsKey($check)) { $reportingSteps[$check] = [System.Collections.Generic.List[string]]::new() }
+        if (-not $reportingSteps[$check].Contains([string]$item.Step)) { $reportingSteps[$check].Add([string]$item.Step) }
+    }
+    foreach ($item in $items) {
+        $check = [string]$item.Check
+        if ($check -ne 'Report' -and [string]$item.Step -ne $latestStep[$check]) { continue }
+        $copy = [pscustomobject]@{}
+        foreach ($property in $item.PSObject.Properties) { $copy | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value }
+        if ($check -ne 'Report') { $copy.Step = $reportingSteps[$check] -join ', ' }
+        $copy
+    }
+}
+
+function Get-GuidedHealthReviewCount {
+    <#
+    .SYNOPSIS
+        Counts the health-step review conditions that stopped a guided run at the health gate.
+    .DESCRIPTION
+        Returns 0 unless the run did not complete, no restart or repair is pending, health is not
+        ready, and the health step is the last recorded step with exit code 2. Those are the
+        conditions under which the guided run stops for health review before cleanup.
+    #>
+    [CmdletBinding()]
+    [OutputType([int])]
+    param([psobject]$GuidedResult)
+
+    if (-not $GuidedResult) { return 0 }
+    foreach ($name in @('Completed','RestartRequired','RepairRecommended','HealthReady','Steps','ReviewFindings')) {
+        if (-not $GuidedResult.PSObject.Properties[$name]) { return 0 }
+    }
+    if ($GuidedResult.Completed -or $GuidedResult.RestartRequired -or $GuidedResult.RepairRecommended -or $GuidedResult.HealthReady) { return 0 }
+    $lastStep = @($GuidedResult.Steps) | Select-Object -Last 1
+    if (-not $lastStep -or -not $lastStep.PSObject.Properties['Step'] -or -not $lastStep.PSObject.Properties['ExitCode']) { return 0 }
+    if ([string]$lastStep.Step -ne '02-WindowsHealth' -or [string]$lastStep.ExitCode -ne '2') { return 0 }
+    return @($GuidedResult.ReviewFindings | Where-Object {
+        $null -ne $_ -and $_.PSObject.Properties['Step'] -and [string]$_.Step -eq '02-WindowsHealth'
+    }).Count
 }
 
 function Get-GuiResultEvidence {
@@ -104,7 +173,7 @@ function Get-GuiResultEvidence {
                 $reason = $reason.Substring(0, $reviewMarker).TrimEnd()
             }
         }
-        $findings = @($GuidedResult.ReviewFindings | Where-Object { $null -ne $_ })
+        $findings = @(Merge-GuiReviewFinding -Finding @($GuidedResult.ReviewFindings))
     } elseif ($Report) {
         $failed = @($Report.Results | Where-Object { $_.Status -eq 'Failed' })
         $review = @($Report.Results | Where-Object { $_.Status -eq 'Review' })
@@ -418,4 +487,4 @@ function Get-CleanupSelectionKey {
     return '{0}|{1}|{2}' -f $age, $EmptyRecycleBin, $ClearDeliveryCache
 }
 
-Export-ModuleMember -Function Get-CleanupSelectionKey, Get-DashboardStateStyle, Get-GuiResultPresentation, Get-GuiResultEvidence, Format-GuiTaskSummary, Format-GuiTaskDetail, Get-LiveActivityState, Get-LiveActivityText
+Export-ModuleMember -Function Get-CleanupSelectionKey, Get-DashboardStateStyle, Get-GuiResultPresentation, Merge-GuiReviewFinding, Get-GuidedHealthReviewCount, Get-GuiResultEvidence, Format-GuiTaskSummary, Format-GuiTaskDetail, Get-LiveActivityState, Get-LiveActivityText
